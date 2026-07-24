@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body {
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Inter', 'Hind Siliguri', 'Plus Jakarta Sans', sans-serif;
+    background-color: #F8F5F0;
+    color: #1B3022;
+  }
+  
+  #root {
+    overflow-x: hidden;
+    width: 100%;
+    max-width: 100%;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4, .font-serif {
+    font-family: 'Playfair Display', 'Hind Siliguri', Georgia, serif;
+  }
+
+  /* Container class as per requirements */
+  .container {
+    max-width: 1280px;
+    width: 100%;
+    margin: 0 auto;
+    padding-inline: 24px;
+  }
+
+  img, video, canvas, svg {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 1023px) {
+  .container {
+    padding-inline: 16px;
+  }
+
+  a, button, h1, h2, h3, p, span {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  body {
+    font-size: 16px;
+  }
+}
+
+/* Custom Smooth Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #1B3022;
+}
+::-webkit-scrollbar-thumb {
+  background: #B38B4D;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #96723b;
+}
+
+.bg-deep-green {
+  background-color: #1B3022;
+}
+.text-deep-green {
+  color: #1B3022;
+}
+.border-deep-green {
+  border-color: #1B3022;
+}
+
+.gold-accent, .text-gold {
+  color: #B38B4D;
+}
+.bg-gold {
+  background-color: #B38B4D;
+}
+.hover\:bg-gold-dark:hover {
+  background-color: #a17a3b;
+}
+.border-gold {
+  border-color: #B38B4D;
+}
+
+.gradient-overlay {
+  background: linear-gradient(to top, rgba(27, 48, 34, 0.92) 0%, rgba(27, 48, 34, 0.45) 50%, transparent 100%);
+}
+
+.glass-panel {
+  background: rgba(248, 245, 240, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(27, 48, 34, 0.1);
+}
+
+.glass-dark {
+  background: rgba(27, 48, 34, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(179, 139, 77, 0.3);
+}
+

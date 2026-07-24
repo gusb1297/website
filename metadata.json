@@ -1,0 +1,6 @@
+{
+  "name": "Village Development Organization Bogura",
+  "description": "Official website and management portal for Gram Unnayan Sangstha Bogura (Village Development Organization Bogura)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
