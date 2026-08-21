@@ -17,7 +17,11 @@ admin panel without touching code.
 ### Admin panel (`/admin`)
 - **Hero Slider** – add / edit / reorder / toggle / delete.
 - **Website Content** – edit *all* Home & About page copy (bilingual fields), leader bios, legal items.
-- **Programs, News, Videos, Publications, Notices, Careers** – full create / edit / delete.
+- **Programs, News, Publications, Notices, Careers** – full create / edit / delete.
+- **Videos – two-way upload**: ① *device upload* (drag & drop an MP4/WebM/MOV from a phone or computer,
+  with a live progress bar; stored on **Cloudinary** when configured, local disk otherwise) or
+  ② *YouTube / Vimeo link* (paste any watch / share / shorts / live / embed URL — it is normalised to a
+  real embed URL and the thumbnail is fetched automatically). Titles/categories are editable inline.
 - **Photo Gallery** – albums (add / edit / delete) and per-album photos (upload / delete).
 - **Governance / Committee** – add / edit / delete members across all committees.
 - **Partners & Donors** – add / edit / delete.
@@ -31,7 +35,9 @@ admin panel without touching code.
   color; changing them in admin recolors the whole site (Tailwind palette is mapped onto the tokens).
 - **Persistence** – all content is saved to `data/store.json` (debounced + flushed on shutdown), so admin
   edits survive restarts. MongoDB is supported as an optional connection.
-- **Uploads** – local disk by default; Cloudinary when credentials are provided.
+- **Uploads** – local disk by default; Cloudinary when credentials are provided (videos use chunked
+  `upload_large`, so large files do not fail, and a Cloudinary failure silently falls back to local disk
+  so an upload is never lost).
 - **Security** – JWT auth, admin role gating, login rate limiting, security headers, size-capped body
   parsing, JSON error handler, `x-powered-by` disabled, optional HSTS in production.
 - **Type-safe** – strict TypeScript end to end; `npm run lint` passes.
@@ -125,11 +131,47 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 | `ADMIN_EMAILS` | no | Comma-separated admin emails (overrides demo) |
 | `ADMIN_PASSWORDS` | no | Comma-separated admin passwords (overrides demo) |
 | `MONGODB_URI` | no | Optional Mongo connection (future persistence layer) |
-| `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET` | no | Use Cloudinary for uploads instead of local disk |
+| `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET` | no | Use Cloudinary for uploads (incl. video) instead of local disk |
+| `CLOUDINARY_URL` | no | Alternative single-string Cloudinary credential |
+| `MAX_UPLOAD_MB` | no (default 512) | Maximum size of a single uploaded file |
 
 ## 📄 API overview (all under `/api`)
 
-`auth/login`, `hero-slides`, `programs`, `news`, `videos`, `notices`, `publications`,
+`auth/login`, `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
 `gallery/albums` (+ `/photos`), `committee`, `partners`, `career` (+ `/applications`),
 `stats`, `settings`, `page-content`. Public reads are open; writes require a valid admin JWT
 (settings & page-content additionally require the `admin` role).
+
+## 🎬 Two-way video upload
+
+Videos can be added in **two ways** from **/admin → ভিডিও গ্যালারি**, and both end up in the same public
+video library (Home highlight + Gallery → ভিডিও গ্যালারি).
+
+| Way | How | Where the file lives | Thumbnail |
+| --- | --- | --- | --- |
+| **Device upload** | Drag & drop / pick an MP4, WebM, MOV, MKV… (up to `MAX_UPLOAD_MB`, default 512 MB). A progress bar shows the upload and can be cancelled. | **Cloudinary** (chunked `upload_large`) when credentials are set — otherwise `uploads/videos/` on the server | Auto poster frame from Cloudinary (`so_2`), or ffmpeg locally; a custom image can be uploaded instead |
+| **YouTube / Vimeo link** | Paste any URL: `watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`, `player.vimeo.com/…`, even a bare 11-char YouTube id. `?t=90` start offsets are preserved. | Nothing is stored — the video is embedded from the provider | `https://i.ytimg.com/vi/<id>/hqdefault.jpg` automatically (overridable) |
+
+### Enabling Cloudinary
+
+```env
+CLOUDINARY_CLOUD_NAME="your-cloud"
+CLOUDINARY_API_KEY="123456789012345"
+CLOUDINARY_API_SECRET="your-secret"
+```
+
+Put these in `.env` (loaded automatically) and restart. Uploaded videos then get a Cloudinary CDN URL,
+`/api/videos/stream/:id` 302-redirects to it, and deleting a video also destroys the Cloudinary asset.
+Without credentials everything keeps working on local disk with HTTP-range streaming.
+
+### Video API
+
+| Method | Endpoint | Body |
+| --- | --- | --- |
+| `GET` | `/api/videos` | – |
+| `POST` | `/api/videos` | multipart with `videoFile` (+ optional `thumbnail`) **or** `embedUrl` / `youtubeUrl`; plus `title`, `category`, `description` |
+| `PUT` | `/api/videos/:id` | `title`, `category`, `description`, `embedUrl`, `thumbnail` |
+| `DELETE` | `/api/videos/:id` | – (also removes the Cloudinary / local asset) |
+| `GET` | `/api/videos/stream/:id` | Range-enabled streaming (redirects to Cloudinary when remote) |
+
+Legacy `POST /api/videos/upload` and `POST /api/videos/embed` still work.

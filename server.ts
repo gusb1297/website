@@ -1,3 +1,6 @@
+// Load .env before anything else so config modules (Cloudinary, JWT, Mongo)
+// see the credentials on first use.
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
