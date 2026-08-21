@@ -1,5 +1,6 @@
 import { v2 as cloudinary } from 'cloudinary';
 import fs from 'fs';
+import path from 'path';
 
 // Configure Cloudinary if environment variables exist
 if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
@@ -14,29 +15,40 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
   console.log('Cloudinary initialized via CLOUDINARY_URL');
 }
 
+/**
+ * Upload a local temp file. When Cloudinary is configured the file is pushed
+ * to the cloud; otherwise the file stays in the local `uploads/` directory and
+ * the correct local URL (matching the real sub-folder: images/videos/pdfs)
+ * is returned.
+ */
 export async function uploadToCloudinary(filePath: string, folder = 'vdo_bogura'): Promise<string> {
-  try {
-    const isCloudinaryConfigured = Boolean(
-      process.env.CLOUDINARY_URL ||
-        (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET)
-    );
+  const isCloudinaryConfigured = Boolean(
+    process.env.CLOUDINARY_URL ||
+      (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET)
+  );
 
-    if (isCloudinaryConfigured) {
+  if (isCloudinaryConfigured) {
+    try {
       const result = await cloudinary.uploader.upload(filePath, {
         folder,
         resource_type: 'auto',
       });
       // Optionally clean up local temp file after uploading to Cloudinary
       if (fs.existsSync(filePath)) {
-        try { fs.unlinkSync(filePath); } catch (e) { /* ignore */ }
+        try {
+          fs.unlinkSync(filePath);
+        } catch (e) {
+          /* ignore */
+        }
       }
       return result.secure_url;
+    } catch (error) {
+      console.error('Cloudinary upload error:', error);
+      // Fall through to local storage so the upload never hard-fails.
     }
-  } catch (error) {
-    console.error('Cloudinary upload error:', error);
   }
 
-  // Fallback to local upload path if Cloudinary is not configured or fails
-  const fileName = filePath.split('/').pop() || filePath.split('\\').pop();
-  return `/uploads/images/${fileName}`;
+  // Local fallback: point at the file's real location inside `uploads/`.
+  const relative = path.relative(process.cwd(), filePath).split(path.sep).join('/');
+  return `/${relative}`;
 }

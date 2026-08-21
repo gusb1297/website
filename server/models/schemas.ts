@@ -14,6 +14,7 @@ import {
   Application,
   StatItem,
   SiteSettings,
+  PageContent,
 } from '../../src/types';
 
 // Mongoose Schemas
@@ -148,18 +149,35 @@ const AdminSchema = new Schema({
 
 const SiteSettingsSchema = new Schema({
   ngoName: String,
+  ngoNameEn: String,
   ngoTagline: String,
+  logoUrl: String,
   address: String,
+  addressEn: String,
   branchAddresses: Array,
   phone: String,
   emergencyHotline: String,
   email: String,
   officeHours: String,
+  officeHoursEn: String,
+  headerLocation: Object,
+  footerAbout: Object,
+  footerCopyright: Object,
   mapLat: Number,
   mapLng: Number,
   registrationNumber: String,
   establishedYear: Number,
   socialLinks: Object,
+  theme: {
+    primary: String,
+    accent: String,
+  },
+});
+
+const PageContentSchema = new Schema({
+  home: Object,
+  about: Object,
+  updatedAt: { type: Date, default: Date.now },
 });
 
 export const MHeroSlide = mongoose.models.HeroSlide || mongoose.model('HeroSlide', HeroSlideSchema);
@@ -177,6 +195,7 @@ export const MApplication = mongoose.models.Application || mongoose.model('Appli
 export const MStat = mongoose.models.Stat || mongoose.model('Stat', StatSchema);
 export const MAdmin = mongoose.models.Admin || mongoose.model('Admin', AdminSchema);
 export const MSiteSettings = mongoose.models.SiteSettings || mongoose.model('SiteSettings', SiteSettingsSchema);
+export const MPageContent = mongoose.models.PageContent || mongoose.model('PageContent', PageContentSchema);
 
 // In-Memory Fallback Memory Store Data
 export const memoryStore = {
@@ -194,7 +213,11 @@ export const memoryStore = {
   applications: [] as Application[],
   stats: [] as StatItem[],
   settings: {} as SiteSettings,
+  pageContent: null as unknown as PageContent,
 };
+
+/** Default site-wide brand colors (editable from the admin color picker). */
+export const DEFAULT_THEME = { primary: '#1B3022', accent: '#B38B4D' };
 
 export function seedInMemoryStore() {
   memoryStore.heroSlides = [
@@ -308,7 +331,7 @@ export function seedInMemoryStore() {
   memoryStore.news = [
     {
       id: 'news-1',
-      title: 'গ্রাম উন্নয়ন সংস্থা বগুড়ার (GUSB) উদ্যোগে ৫০০ প্রবীণ ও দুস্থদের মাঝে বিনামূল্যে চিকিৎসা ও ওষুধ বিতরণ',
+      title: 'গ্রাম উন্নয়ন সংস্থা বগুড়ার (GUSB) উদ্যোগে ৫০ প্রবীণ ও দুস্থদের মাঝে বিনামূল্যে চিকিৎসা ও ওষুধ বিতরণ',
       slug: 'gusb-free-medical-camp-bogura',
       category: 'Impact Story',
       thumbnail: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=800&q=80',
@@ -466,10 +489,12 @@ export function seedInMemoryStore() {
   ];
 
   memoryStore.settings = {
-    ngoName: 'গ্রাম উন্নয়ন সংস্থা বগুড়া (Village Development Organization Bogura)',
+    ngoName: 'গ্রাম উন্নয়ন সংস্থা বগুড়া',
+    ngoNameEn: 'Village Development Organization Bogura (GUSB)',
     ngoTagline: 'টেকসই বিকাশ ও স্বাবলম্বী গ্রামীণ সমাজ গঠনের অঙ্গীকার',
     logoUrl: 'https://i.ibb.co.com/G4ygxGcZ/NGO.png',
-    address: 'গ্রাম উন্নয়ন সংস্থা বগুড়া, নওয়াববাড়ী রোড, বগুড়া সদর, বগুড়া-৫৮০০, বাংলাদেশ',
+    address: 'গ্রাম উন্নয়ন সংস্থা বগুড়া, নওয়াববাড়ী রোড, বগুড়া সদর, বগুড়া-৫৮০, বাংলাদেশ',
+    addressEn: 'Village Development Organization Bogura, Nawabbari Road, Bogura Sadar, Bogura-5800, Bangladesh',
     branchAddresses: [
       {
         name: 'শেরপুর শাখা',
@@ -482,15 +507,153 @@ export function seedInMemoryStore() {
     emergencyHotline: '16300',
     email: 'info@vdobogura.org',
     officeHours: 'রবিবার - বৃহস্পতিবার: সকাল ৯:০০ - বিকাল ৫:০০ (শুক্র ও শনিবার বন্ধ)',
+    officeHoursEn: 'Sun - Thu: 9:00 AM - 5:00 PM (Fri & Sat closed)',
+    headerLocation: { bn: 'বগুড়া সদর, বগুড়া, বাংলাদেশ', en: 'Bogura Sadar, Bogura, Bangladesh' },
+    footerAbout: {
+      bn: 'বগুড়া ও উত্তরবঙ্গের সুবিধাবঞ্চিত গ্রামীণ মানুষের আর্থ-সামাজিক উন্নয়ন, ক্ষুদ্রঋণ সহায়তায় আত্মকর্মসংস্থান এবং জীবনমান বৃদ্ধিতে নিবেদিত।',
+      en: 'Dedicated to socio-economic development, microfinance support, self-reliance, and uplifting lives across Bogura and North Bengal.',
+    },
+    footerCopyright: { bn: 'সর্বস্বত্ব সংরক্ষিত।', en: 'All rights reserved.' },
     mapLat: 24.8481,
     mapLng: 89.373,
-    registrationNumber: 'সমাজসেবা অধিদপ্তর রজি: নং- বগুড়া-০৮৬৪১৮ / এনজিও বিষয়ক ব্যুরো রজি: নং- ২৫৪০',
+    registrationNumber: 'সমাজসেবা অধিদপ্তর রজি: নং- বগুড়া-০৮৪১৮ / এনজিও বিষয়ক ব্যুরো রজি: নং- ২৫৪০',
     establishedYear: 2010,
     socialLinks: {
       facebook: 'https://facebook.com',
       youtube: 'https://youtube.com',
       linkedin: 'https://linkedin.com',
       twitter: 'https://twitter.com',
+    },
+    theme: { ...DEFAULT_THEME },
+  };
+
+  // Home & About page copy - everything a visitor sees on the public site is
+  // editable from the Admin Panel (Website Content tab).
+  memoryStore.pageContent = {
+    home: {
+      noticeBadge: { bn: 'বিশেষ নোটিশ', en: 'SPECIAL NOTICE' },
+      viewNotice: { bn: 'নোটিশ দেখুন', en: 'VIEW NOTICE' },
+      establishedBadge: {
+        bn: '১৫ বছরের বিশ্বস্ত সামাজিক সেবা',
+        en: '15 Years of Trusted Social Service',
+      },
+      teaserTitle: {
+        bn: 'গ্রাম উন্নয়ন সংস্থা বগুড়া (GUSB) - প্রান্তিক মানুষের পাশে নিরন্তর',
+        en: 'Village Development Organization Bogura (GUSB) - Standing Beside Rural Communities',
+      },
+      teaserText: {
+        bn: 'গ্রাম উন্নয়ন সংস্থা বগুড়া (Gram Unnayan Sangstha Bogura - GUSB) ২০১০ সালে প্রতিষ্ঠিত উত্তরবঙ্গের একটি অগ্রগামী নন-গভর্নমেন্টাল অর্গানাইজেশন (NGO)। আমরা বগুড়া ও উত্তরবঙ্গের সুবিধাবঞ্চিত মানুষ, বিশেষ করে নারী ও শিশুদের ক্ষমতায়নে নিবেদিতভাবে কাজ করছি।',
+        en: 'Village Development Organization Bogura (GUSB) is a premier non-governmental organization established in 2010. We are dedicated to empowering disadvantaged communities, especially women and children, across Bogura and North Bengal.',
+      },
+      visionTitle: { bn: 'আমাদের ভিশন', en: 'Our Vision' },
+      visionText: {
+        bn: 'দারিদ্র্যমুক্ত, স্বাবলম্বী ও সমতাভিত্তিক গ্রাম বাংলাদেশ গড়ে তোলা।',
+        en: 'Building a poverty-free, self-reliant, and equitable rural Bangladesh.',
+      },
+      missionTitle: { bn: 'আমাদের মিশন', en: 'Our Mission' },
+      missionText: {
+        bn: 'ক্ষুদ্রঋণ, শিক্ষা, স্বাস্থ্য ও কৃষি প্রযুক্তির সুফল পৌঁছে দেওয়া।',
+        en: 'Delivering the benefits of microfinance, education, healthcare, and sustainable agricultural technology.',
+      },
+      learnMoreCta: { bn: 'আমাদের সম্পর্কে আরো জানুন', en: 'Learn More About Us' },
+      teaserImage:
+        'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=1200&q=80',
+      teaserImageLabel: { bn: 'মাঠ পর্যায়ের বাস্তব প্রভাব', en: 'Real Field Impact' },
+      teaserImageCaption: {
+        bn: 'কুড়িগ্রাম, গাইবান্ধা ও রংপুরের ২৮টি উপজেলায় আমাদের প্রত্যক্ষ সেবা বিস্তৃত।',
+        en: 'Direct services across 28 sub-districts in Kurigram, Gaibandha, and Rangpur.',
+      },
+      programsBadge: { bn: 'আমাদের মূল কার্যক্রম', en: 'Our Core Activities' },
+      programsTitle: {
+        bn: 'টেকসই সমাজ বিনির্মাণে প্রধান প্রজেক্টসমূহ',
+        en: 'Key Projects for Sustainable Community Development',
+      },
+      viewAllPrograms: { bn: 'সব প্রজেক্ট দেখুন', en: 'View All Projects' },
+      videoBadge: { bn: 'ভিডিও প্রামাণ্যচিত্র', en: 'Video Documentaries' },
+      videoTitle: {
+        bn: 'চরাঞ্চলে পরিবর্তনের গল্প ও বাস্তব চিত্র',
+        en: 'Real Impact & Stories of Hope from Riverine Char Lands',
+      },
+      videoText: {
+        bn: 'আমাদের অফিশিয়াল ভিডিও গ্যালারিতে চরাঞ্চলের সুবিধা বঞ্চিত মানুষের বদলে যাওয়া জীবন, ক্ষুদ্রঋণ উদ্যোক্তাদের সাফল্যের গল্প এবং মাঠপর্যায়ের কাজ দেখুন।',
+        en: 'Watch official video documentaries showing transformed lives, microfinance entrepreneur successes, and field work across rural communities.',
+      },
+      watchAllVideos: { bn: 'সব ভিডিও দেখুন', en: 'Watch All Videos' },
+      newsBadge: { bn: 'সংবাদ ও ইভেন্ট', en: 'News & Events' },
+      newsTitle: {
+        bn: 'গ্রাম উন্নয়ন সংস্থা বগুড়া (GUSB) এর সাম্প্রতিক খবরাখবর',
+        en: 'Latest News & Field Updates from GUSB',
+      },
+      readAllNews: { bn: 'সব খবর দেখুন', en: 'Read All News' },
+      partnersTitle: {
+        bn: 'আমাদের সহযোগী ও তহবিল অংশীদারবৃন্দ (Partners & Donors)',
+        en: 'Our Partners & Donors',
+      },
+    },
+    about: {
+      bannerBadge: { bn: 'আমাদের পরিচয় ও ইতিহাস', en: 'Our Identity & Heritage' },
+      bannerTitle: {
+        bn: 'গ্রাম উন্নয়ন সংস্থা বগুড়া (Village Development Organization Bogura)',
+        en: 'Village Development Organization Bogura (GUSB)',
+      },
+      bannerSub: {
+        bn: '২০১০ সাল থেকে বগুড়া ও উত্তরবঙ্গের প্রত্যন্ত অঞ্চলে দরিদ্র ও সুবিধাবঞ্চিত মানুষের স্বাবলম্বিতার লক্ষ্যে কর্মরত।',
+        en: 'Working continuously since 2010 to build self-reliance for disadvantaged communities in Bogura and North Bengal.',
+      },
+      historyTitle: { bn: 'সংস্থার ইতিহাস ও সূচনা', en: 'Organization History & Genesis' },
+      history1: {
+        bn: 'উত্তরবঙ্গের অবহেলিত ও নদীভাঙন কবলিত কুড়িগ্রাম, গাইবান্ধা ও রংপুর অঞ্চলের নদীবেষ্টিত চরে বসবাসরত মানুষের অভাবনীয় কষ্ট ও দারিদ্র্যের চিত্র থেকেই ২০১০ সালে গ্রাম উন্নয়ন সংস্থা বগুড়ার (GUSB) জন্ম। কতিপয় সমাজসেবী, শিক্ষাবিদ ও উন্নয়নকর্মীর সুচিন্তিত উদ্যোগে এই অরাজনৈতিক, অলাভজনক বেসরকারি সেবা সংস্থা আত্মপ্রকাশ করে।',
+        en: 'Village Development Organization Bogura (GUSB) was established in 2010 in response to the severe poverty and climate vulnerabilities faced by communities living along riverbank char areas in Kurigram, Gaibandha, Rangpur, and Bogura. Founded by visionary social workers and educators, GUSB operates as a non-political, non-profit development agency.',
+      },
+      history2: {
+        bn: 'বিগত ১৫ বছরে সংস্থাটি একটি ছোট সামাজিক উদ্যোগ থেকে উত্তরবঙ্গের অন্যতম নির্ভরযোগ্য উন্নয়ন সংস্থায় পরিণত হয়েছে। আজ আমরা প্রায় সাড়ে ৪ লাখ মানুষকে ক্ষুদ্রঋণ, স্বাস্থ্য, শিক্ষা ও জলবায়ু সহনশীল কৃষি প্রযুক্তির মাধ্যমে স্বয়ংসম্পূর্ণ হতে সাহায্য করেছি।',
+        en: 'Over the past 15 years, GUSB has evolved into one of the most trusted development organizations in North Bengal, empowering over 450,000 individuals through microfinance, healthcare, education, and climate-resilient agriculture.',
+      },
+      vision: {
+        bn: 'একটি শোষনমুক্ত, আত্মনির্ভরশীল ও ন্যায়ভিত্তিক গ্রামীণ সমাজ গঠন, যেখানে প্রত্যেক নারী ও শিশু সম্মানজনক জীবন ও মৌলিক অধিকার ভোগ করবে।',
+        en: 'To build an exploitation-free, self-reliant, and equitable rural society where every woman and child enjoys dignity and fundamental human rights.',
+      },
+      mission: {
+        bn: 'সুবিধাবঞ্চিত জনগোষ্ঠীকে সুসংগঠিত করা, তাদের পেশাগত দক্ষতা বৃদ্ধি, সহজ শর্তে ক্ষুদ্রঋণ প্রদান এবং শিক্ষা ও স্যানিটেশন সুবিধার উন্নয়ন ঘটানো।',
+        en: 'Organizing underprivileged communities, enhancing vocational skills, providing accessible microfinance, and expanding sanitation and educational facilities.',
+      },
+      messageSectionBadge: { bn: 'নেতৃত্বের বার্তা', en: 'Leadership Message' },
+      messageSectionTitle: {
+        bn: 'চেয়ারম্যান ও নির্বাহী পরিচালকের বক্তব্য',
+        en: 'Message from Chairman & Executive Director',
+      },
+      chairman: {
+        name: { bn: 'ড. মো: আব্দুর রহমান', en: 'Dr. Md. Abdur Rahman' },
+        title: { bn: 'চেয়ারম্যান, সাধারণ পরিষদ', en: 'Chairman, General Council' },
+        message: {
+          bn: '"আমাদের মূল উদ্দেশ্য কোনো নির্দিষ্ট আর্থিক সুবিধায় সীমাবদ্ধ নয়, বরং প্রতিটি পরিবারের মাঝে স্থায়ী স্বাবলম্বিতার মানসিকতা ও সক্ষমতা তৈরি করা। আমরা সততা ও স্বচ্ছতার সাথে কাজ চালিয়ে যেতে প্রতিশ্রুতিবদ্ধ।"',
+          en: '"Our ultimate objective extends beyond short-term assistance — we strive to instill self-reliance, entrepreneurship, and dignity in every household we serve."',
+        },
+        photo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+      },
+      director: {
+        name: { bn: 'বেগম সুলতানা পারভীন', en: 'Begum Sultana Parveen' },
+        title: { bn: 'নির্বাহী পরিচালক', en: 'Executive Director' },
+        message: {
+          bn: '"১৫ বছরের এই যাত্রায় আমাদের সবচেয়ে বড় অর্জন উত্তরবঙ্গের চরাঞ্চলের হাজার হাজার নারীদের তৈরি করা ক্ষুদ্র ব্যবসায়িক সফলতার উদাহরণসমূহ। তাদের সাফল্যই আমাদের অনুপ্রেরণা।"',
+          en: '"Over 15 years, our greatest pride lies in thousands of rural female micro-entrepreneurs whose success stories light up the riverine charlands."',
+        },
+        photo: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=200&q=80',
+      },
+      legalBadge: { bn: 'আইনগত স্বীকৃতি ও অনুমোদন', en: 'Legal Status & Accreditation' },
+      legalTitle: {
+        bn: 'গণপ্রজাতন্ত্রী বাংলাদেশ সরকার কর্তৃক নিবন্ধিত',
+        en: 'Registered under Government of Bangladesh',
+      },
+      legalSub: {
+        bn: 'আমাদের সকল কার্যক্রম সরকারি বিধিমালা ও মাইক্রোক্রেডিট রেগুলেটরি অথরিটির (MRA) নিয়মাবলী অনুসরণ করে পরিচালিত।',
+        en: 'All operations comply strictly with government guidelines and Microcredit Regulatory Authority (MRA) standards.',
+      },
+      legalItems: [
+        { bn: 'সমাজসেবা অধিদপ্তর: ঢাকা-০৯৪৫১২', en: 'Dept of Social Welfare: Dhaka-094512' },
+        { bn: 'এনজিও বিষয়ক ব্যুরো: ২৪১৫', en: 'NGO Affairs Bureau Reg: 2415' },
+        { bn: 'এমআরএ (MRA) সনদ নং: ০০৯২', en: 'MRA License No: 00942' },
+      ],
     },
   };
 }

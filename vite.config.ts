@@ -18,7 +18,7 @@ export default defineConfig(() => {
 
     server: {
       // Allow all hosts (Development only)
-      allowedHosts: true,
+      allowedHosts: true as const,
 
       // Listen on all network interfaces
       host: '0.0.0.0',
@@ -36,7 +36,7 @@ export default defineConfig(() => {
     preview: {
       host: '0.0.0.0',
       port: 4173,
-      allowedHosts: true,
+      allowedHosts: true as const,
     },
   };
 });

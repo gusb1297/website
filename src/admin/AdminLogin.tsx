@@ -43,7 +43,7 @@ export const AdminLogin: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen pt-24 pb-16 bg-slate-950 text-white flex items-center justify-center px-4 relative overflow-hidden">
+    <div className="min-h-screen py-16 bg-slate-950 text-white flex items-center justify-center px-4 relative overflow-hidden">
       {/* Background Subtle Gradient */}
       <div className="absolute inset-0 bg-gradient-to-br from-emerald-950 via-slate-950 to-emerald-950 opacity-90" />
 

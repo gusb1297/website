@@ -63,7 +63,7 @@ export const StatsCounter: React.FC<StatsCounterProps> = ({ stats }) => {
   return (
     <section
       ref={containerRef}
-      className="bg-[#1B3022] text-white py-14 px-6 sm:px-12 relative overflow-hidden border-y border-[#1B3022]/20"
+      className="bg-[color:var(--site-primary)] text-white py-14 px-6 sm:px-12 relative overflow-hidden border-y border-[color:var(--site-primary)]/20"
     >
       <div className="absolute top-0 right-0 opacity-10 pointer-events-none">
         <svg width="240" height="120" viewBox="0 0 200 100">
@@ -77,7 +77,7 @@ export const StatsCounter: React.FC<StatsCounterProps> = ({ stats }) => {
             <div key={stat.id || idx} className="text-center relative px-2 py-4">
               <div className="serif text-3xl sm:text-4xl lg:text-5xl text-white font-bold tracking-tight">
                 {counts[idx]?.toLocaleString(locale) || (0).toLocaleString(locale)}
-                <span className="text-[#B38B4D] font-serif font-bold ml-1">{stat.suffix || '+'}</span>
+                <span className="text-[color:var(--site-accent)] font-serif font-bold ml-1">{stat.suffix || '+'}</span>
               </div>
               <div className="sans text-[10px] sm:text-xs uppercase tracking-widest text-white/60 mt-1 font-semibold">
                 {stat.label}

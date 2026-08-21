@@ -1,5 +1,47 @@
 @import "tailwindcss";
 
+/*
+  Site-wide theming.
+  `--site-primary` / `--site-accent` are the two brand colors. They are
+  updated at runtime by the SettingsProvider (from the admin panel's color
+  picker) and every brand utility in the app derives from them.
+*/
+:root {
+  --site-primary: #1b3022;
+  --site-accent: #b38b4d;
+  --site-accent-dark: #a17a3b;
+  --site-accent-light: #c6a26a;
+  --site-cream: #f8f5f0;
+}
+
+/*
+  Map the palette shades the site uses (emerald-* = primary family,
+  amber-* = accent family) onto the runtime brand tokens, so changing the
+  two colors in the admin panel recolors the entire site.
+*/
+@theme {
+  /* Primary (deep green by default) */
+  --color-emerald-950: var(--site-primary);
+  --color-emerald-900: color-mix(in oklab, var(--site-primary) 86%, white);
+  --color-emerald-800: color-mix(in oklab, var(--site-primary) 72%, white);
+  --color-emerald-700: color-mix(in oklab, var(--site-primary) 58%, white);
+  --color-emerald-600: color-mix(in oklab, var(--site-primary) 44%, white);
+  --color-emerald-400: color-mix(in oklab, var(--site-primary) 28%, white);
+  --color-emerald-300: color-mix(in oklab, var(--site-primary) 18%, white);
+  --color-emerald-200: color-mix(in oklab, var(--site-primary) 10%, white);
+
+  /* Accent (gold by default) */
+  --color-amber-500: var(--site-accent);
+  --color-amber-600: color-mix(in oklab, var(--site-accent) 82%, black);
+  --color-amber-700: color-mix(in oklab, var(--site-accent) 66%, black);
+  --color-amber-800: color-mix(in oklab, var(--site-accent) 52%, black);
+  --color-amber-400: color-mix(in oklab, var(--site-accent) 76%, white);
+  --color-amber-300: color-mix(in oklab, var(--site-accent) 58%, white);
+  --color-amber-200: color-mix(in oklab, var(--site-accent) 40%, white);
+  --color-amber-100: color-mix(in oklab, var(--site-accent) 24%, white);
+  --color-amber-50: color-mix(in oklab, var(--site-accent) 12%, white);
+}
+
 @layer base {
   html, body {
     overflow-x: hidden;
@@ -9,10 +51,10 @@
     padding: 0;
     box-sizing: border-box;
     font-family: 'Inter', 'Hind Siliguri', 'Plus Jakarta Sans', sans-serif;
-    background-color: #F8F5F0;
-    color: #1B3022;
+    background-color: var(--site-cream);
+    color: var(--site-primary);
   }
-  
+
   #root {
     overflow-x: hidden;
     width: 100%;
@@ -59,52 +101,56 @@
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #1B3022;
+  background: var(--site-primary);
 }
 ::-webkit-scrollbar-thumb {
-  background: #B38B4D;
+  background: var(--site-accent);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #96723b;
+  background: var(--site-accent-dark);
 }
 
 .bg-deep-green {
-  background-color: #1B3022;
+  background-color: var(--site-primary);
 }
 .text-deep-green {
-  color: #1B3022;
+  color: var(--site-primary);
 }
 .border-deep-green {
-  border-color: #1B3022;
+  border-color: var(--site-primary);
 }
 
 .gold-accent, .text-gold {
-  color: #B38B4D;
+  color: var(--site-accent);
 }
 .bg-gold {
-  background-color: #B38B4D;
+  background-color: var(--site-accent);
 }
 .hover\:bg-gold-dark:hover {
-  background-color: #a17a3b;
+  background-color: var(--site-accent-dark);
 }
 .border-gold {
-  border-color: #B38B4D;
+  border-color: var(--site-accent);
 }
 
 .gradient-overlay {
-  background: linear-gradient(to top, rgba(27, 48, 34, 0.92) 0%, rgba(27, 48, 34, 0.45) 50%, transparent 100%);
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--site-primary) 92%, transparent) 0%,
+    color-mix(in srgb, var(--site-primary) 45%, transparent) 50%,
+    transparent 100%
+  );
 }
 
 .glass-panel {
-  background: rgba(248, 245, 240, 0.88);
+  background: color-mix(in srgb, var(--site-cream) 88%, transparent);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(27, 48, 34, 0.1);
+  border: 1px solid color-mix(in srgb, var(--site-primary) 10%, transparent);
 }
 
 .glass-dark {
-  background: rgba(27, 48, 34, 0.92);
+  background: color-mix(in srgb, var(--site-primary) 92%, transparent);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(179, 139, 77, 0.3);
+  border: 1px solid color-mix(in srgb, var(--site-accent) 30%, transparent);
 }
-

@@ -2,22 +2,31 @@ import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { CareerCircular, Applicant } from '../types';
-import { Briefcase, Users, Download, Trash2, Mail, Phone, Calendar } from 'lucide-react';
+import { Briefcase, Users, Download, Trash2, Mail, Phone, Edit3, X, Save } from 'lucide-react';
 
 export const ManageCareer: React.FC = () => {
   const { token } = useAuth();
-  const { data: careers, refetch: refetchCareers } = useFetch<CareerCircular[]>('/api/career');
-  const { data: applicants, refetch: refetchApplicants } = useFetch<Applicant[]>('/api/career/applicants', {
+  const { data: careers, refetch: refetchCareers } = useFetch<CareerCircular[]>('/api/career?all=true');
+  const { data: applicants, refetch: refetchApplicants } = useFetch<Applicant[]>('/api/career/applications', {
     headers: { Authorization: `Bearer ${token}` },
   });
 
   const [title, setTitle] = useState('');
   const [vacancy, setVacancy] = useState(2);
   const [location, setLocation] = useState('কুড়িগ্রাম ও রংপুর জেলা');
-  const [deadline, setDeadline] = useState('2025-12-31');
+  const [deadline, setDeadline] = useState('2026-12-31');
   const [description, setDescription] = useState('');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfUrl, setPdfUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const [editing, setEditing] = useState<CareerCircular | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editVacancy, setEditVacancy] = useState(1);
+  const [editLocation, setEditLocation] = useState('');
+  const [editDeadline, setEditDeadline] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editPdfUrl, setEditPdfUrl] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,9 +39,10 @@ export const ManageCareer: React.FC = () => {
       formData.append('location', location);
       formData.append('deadline', deadline);
       formData.append('description', description);
-
       if (pdfFile) {
         formData.append('pdfFile', pdfFile);
+      } else if (pdfUrl) {
+        formData.append('pdfFile', pdfUrl);
       }
 
       const res = await fetch('/api/career', {
@@ -46,11 +56,62 @@ export const ManageCareer: React.FC = () => {
       setTitle('');
       setDescription('');
       setPdfFile(null);
+      setPdfUrl('');
       refetchCareers();
     } catch (err) {
       alert('ত্রুটি ঘটেছে');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const startEdit = (circular: CareerCircular) => {
+    setEditing(circular);
+    setEditTitle(circular.title);
+    setEditVacancy(circular.vacancy);
+    setEditLocation(circular.location);
+    setEditDeadline(String(circular.deadline).slice(0, 10));
+    setEditDescription(circular.description);
+    setEditPdfUrl(circular.pdfFile || '');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editing) return;
+    try {
+      const formData = new FormData();
+      formData.append('title', editTitle);
+      formData.append('vacancy', String(editVacancy));
+      formData.append('location', editLocation);
+      formData.append('deadline', editDeadline);
+      formData.append('description', editDescription);
+      formData.append('isActive', String(editing.isActive));
+      if (editPdfUrl) formData.append('pdfFile', editPdfUrl);
+      const res = await fetch(`/api/career/${editing.id}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!res.ok) throw new Error('বিজ্ঞপ্তি আপডেট করা যায়নি');
+      setEditing(null);
+      refetchCareers();
+    } catch (e) {
+      alert('ত্রুটি ঘটেছে');
+    }
+  };
+
+  const toggleActive = async (circular: CareerCircular) => {
+    try {
+      await fetch(`/api/career/${circular.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ isActive: !circular.isActive }),
+      });
+      refetchCareers();
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -62,6 +123,19 @@ export const ManageCareer: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       refetchCareers();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteApplication = async (id: string) => {
+    if (!confirm('আপনি কি এই আবেদনটি মুছে ফেলতে চান?')) return;
+    try {
+      await fetch(`/api/career/applications/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      refetchApplicants();
     } catch (e) {
       console.error(e);
     }
@@ -133,14 +207,26 @@ export const ManageCareer: React.FC = () => {
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">অফিশিয়াল সার্কুলার পিডিএফ (PDF File)</label>
-            <input
-              type="file"
-              accept=".pdf"
-              onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
-              className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
-            />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">অফিশিয়াল সার্কুলার পিডিএফ (PDF File)</label>
+              <input
+                type="file"
+                accept=".pdf"
+                onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
+                className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">অথবা PDF URL দিন</label>
+              <input
+                type="text"
+                placeholder="https://..."
+                value={pdfUrl}
+                onChange={(e) => setPdfUrl(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
+              />
+            </div>
           </div>
 
           <button
@@ -153,7 +239,67 @@ export const ManageCareer: React.FC = () => {
         </form>
       </div>
 
-      {/* 2. Job Applicants Submissions & CV Download Table */}
+      {/* 2. Circulars List with Edit/Delete */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-lg space-y-4">
+        <h4 className="text-lg font-serif font-bold text-slate-900">প্রকাশিত নিয়োগ বিজ্ঞপ্তি ({careers?.length || 0})</h4>
+
+        <div className="space-y-3">
+          {(careers || []).map((circular) => (
+            <div key={circular.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <h5 className="font-serif font-bold text-sm text-slate-900 line-clamp-1">{circular.title}</h5>
+                  <p className="text-[11px] text-slate-500">
+                    পদসংখ্যা: {circular.vacancy} • মেয়াদ: {new Date(circular.deadline).toLocaleDateString('bn-BD')}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => startEdit(circular)}
+                    className="p-2 rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 transition-colors"
+                    title="এডিট"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(circular.id)}
+                    className="p-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {editing?.id === circular.id && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-3 rounded-xl bg-white border border-emerald-300">
+                  <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="পদের নাম" />
+                  <input type="number" value={editVacancy} onChange={(e) => setEditVacancy(Number(e.target.value))} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="পদসংখ্যা" />
+                  <input type="text" value={editLocation} onChange={(e) => setEditLocation(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="কর্মস্থল" />
+                  <input type="date" value={editDeadline} onChange={(e) => setEditDeadline(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" />
+                  <input type="text" value={editPdfUrl} onChange={(e) => setEditPdfUrl(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="PDF URL" />
+                  <textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows={3} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="বিবরণ" />
+                  <div className="col-span-2 flex gap-2">
+                    <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">
+                      <Save className="w-3.5 h-3.5" /> আপডেট সেভ করুন
+                    </button>
+                    <button
+                      onClick={() => toggleActive(circular)}
+                      className={`px-3 py-2 rounded-lg text-xs font-bold ${circular.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}
+                    >
+                      {circular.isActive ? 'সক্রিয় → নিষ্ক্রিয়' : 'নিষ্ক্রিয় → সক্রিয়'}
+                    </button>
+                    <button onClick={() => setEditing(null)} className="px-3 py-2 rounded-lg bg-slate-200 text-slate-600 text-xs font-bold">
+                      <X className="w-3.5 h-3.5" /> বাতিল
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 3. Job Applicants Submissions & CV Download Table */}
       <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-lg space-y-4">
         <h4 className="text-lg font-serif font-bold text-slate-900 flex items-center gap-2">
           <Users className="w-5 h-5 text-emerald-800" /> আবেদনকারীদের তালিকা ও সিভিসমূহ ({applicants?.length || 0})
@@ -187,15 +333,24 @@ export const ManageCareer: React.FC = () => {
                     {new Date(app.submittedAt).toLocaleDateString('bn-BD')}
                   </td>
                   <td className="p-3">
-                    <a
-                      href={app.cvUrl}
-                      download
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-bold hover:bg-amber-400"
-                    >
-                      <Download className="w-3.5 h-3.5" /> সিভি দেখুন
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={app.cvFile}
+                        download
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-bold hover:bg-amber-400"
+                      >
+                        <Download className="w-3.5 h-3.5" /> সিভি দেখুন
+                      </a>
+                      <button
+                        onClick={() => handleDeleteApplication(app.id)}
+                        className="p-1.5 rounded-lg bg-red-100 text-red-700 hover:bg-red-200"
+                        title="আবেদন মুছুন"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

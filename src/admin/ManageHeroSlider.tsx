@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { HeroSlide } from '../types';
-import { Plus, Trash2, ArrowUp, ArrowDown, Eye, EyeOff, Upload, CheckCircle } from 'lucide-react';
+import { Plus, Trash2, Eye, EyeOff, Edit3, X, Save } from 'lucide-react';
 
 export const ManageHeroSlider: React.FC = () => {
   const { token } = useAuth();
@@ -15,6 +15,14 @@ export const ManageHeroSlider: React.FC = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState('');
   const [creating, setCreating] = useState(false);
+
+  const [editing, setEditing] = useState<HeroSlide | null>(null);
+  const [editHeadline, setEditHeadline] = useState('');
+  const [editSubtext, setEditSubtext] = useState('');
+  const [editButtonText, setEditButtonText] = useState('');
+  const [editButtonLink, setEditButtonLink] = useState('');
+  const [editImageUrl, setEditImageUrl] = useState('');
+  const [editImageFile, setEditImageFile] = useState<File | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,6 +77,43 @@ export const ManageHeroSlider: React.FC = () => {
       refetch();
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const startEdit = (slide: HeroSlide) => {
+    setEditing(slide);
+    setEditHeadline(slide.headline);
+    setEditSubtext(slide.subtext);
+    setEditButtonText(slide.buttonText || '');
+    setEditButtonLink(slide.buttonLink || '');
+    setEditImageUrl(slide.image);
+    setEditImageFile(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editing) return;
+    try {
+      const formData = new FormData();
+      formData.append('headline', editHeadline);
+      formData.append('subtext', editSubtext);
+      formData.append('buttonText', editButtonText);
+      formData.append('buttonLink', editButtonLink);
+      formData.append('isActive', String(editing.isActive));
+      if (editImageFile) {
+        formData.append('image', editImageFile);
+      } else if (editImageUrl) {
+        formData.append('image', editImageUrl);
+      }
+      const res = await fetch(`/api/hero-slides/${editing.id}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!res.ok) throw new Error('স্লাইড আপডেট করা যায়নি');
+      setEditing(null);
+      refetch();
+    } catch (e) {
+      alert('ত্রুটি ঘটেছে');
     }
   };
 
@@ -180,21 +225,21 @@ export const ManageHeroSlider: React.FC = () => {
           {(slides || []).map((slide) => (
             <div
               key={slide.id}
-              className="flex flex-col sm:flex-row items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-200 gap-4"
+              className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-200 gap-4"
             >
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 min-w-0">
                 <img
                   src={slide.image}
                   alt={slide.headline}
                   className="w-24 h-16 object-cover rounded-xl border border-slate-300 shrink-0"
                 />
-                <div>
-                  <h5 className="font-serif font-bold text-sm text-slate-900">{slide.headline}</h5>
+                <div className="min-w-0">
+                  <h5 className="font-serif font-bold text-sm text-slate-900 line-clamp-1">{slide.headline}</h5>
                   <p className="text-xs text-slate-600 line-clamp-1">{slide.subtext}</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 shrink-0">
                 <button
                   onClick={() => toggleActive(slide)}
                   className={`p-2 rounded-lg text-xs font-bold flex items-center gap-1 ${
@@ -206,12 +251,81 @@ export const ManageHeroSlider: React.FC = () => {
                 </button>
 
                 <button
+                  onClick={() => startEdit(slide)}
+                  className="p-2 rounded-lg bg-emerald-100 text-emerald-900 hover:bg-emerald-200 transition-colors"
+                  title="এডিট"
+                >
+                  <Edit3 className="w-4 h-4" />
+                </button>
+
+                <button
                   onClick={() => handleDelete(slide.id)}
                   className="p-2 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
+
+              {/* Inline edit form */}
+              {editing?.id === slide.id && (
+                <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-3 p-4 rounded-xl bg-white border border-emerald-300">
+                  <input
+                    type="text"
+                    value={editHeadline}
+                    onChange={(e) => setEditHeadline(e.target.value)}
+                    className="md:col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300"
+                    placeholder="শিরোনাম"
+                  />
+                  <textarea
+                    rows={2}
+                    value={editSubtext}
+                    onChange={(e) => setEditSubtext(e.target.value)}
+                    className="md:col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300"
+                    placeholder="সাবটেক্সট"
+                  />
+                  <input
+                    type="text"
+                    value={editButtonText}
+                    onChange={(e) => setEditButtonText(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-xs border border-slate-300"
+                    placeholder="বাটন টেক্সট"
+                  />
+                  <input
+                    type="text"
+                    value={editButtonLink}
+                    onChange={(e) => setEditButtonLink(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-xs border border-slate-300"
+                    placeholder="বাটন লিঙ্ক (যেমন: /programs)"
+                  />
+                  <input
+                    type="text"
+                    value={editImageUrl}
+                    onChange={(e) => setEditImageUrl(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-xs border border-slate-300"
+                    placeholder="ছবি URL"
+                  />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setEditImageFile(e.target.files?.[0] || null)}
+                    className="px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg"
+                  />
+                  <div className="md:col-span-2 flex gap-2">
+                    <button
+                      onClick={handleSaveEdit}
+                      className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold"
+                    >
+                      <Save className="w-3.5 h-3.5" /> আপডেট সেভ করুন
+                    </button>
+                    <button
+                      onClick={() => setEditing(null)}
+                      className="px-3 py-2 rounded-lg bg-slate-200 text-slate-600 text-xs font-bold"
+                    >
+                      <X className="w-3.5 h-3.5" /> বাতিল
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -7,11 +7,8 @@ import { Image as ImageIcon, Video as VideoIcon } from 'lucide-react';
 
 export const Gallery: React.FC = () => {
   const { data: albums } = useFetch<GalleryAlbum[]>('/api/gallery/albums');
-  const [selectedAlbumId, setSelectedAlbumId] = useState<string>('alb-1');
-  const { data: photos } = useFetch<GalleryPhoto[]>(
-    `/api/gallery/albums/${selectedAlbumId}/photos`
-  );
-  const { data: allPhotos } = useFetch<GalleryPhoto[]>('/api/gallery/albums/alb-1/photos'); // fallback
+  // The grid itself filters per album; load all photos once so every tab works.
+  const { data: photos } = useFetch<GalleryPhoto[]>('/api/gallery/photos');
   const { data: videos } = useFetch<VideoItem[]>('/api/videos');
 
   const [mainTab, setMainTab] = useState<'photos' | 'videos'>('photos');
