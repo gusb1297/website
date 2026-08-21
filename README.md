@@ -60,24 +60,41 @@ npm run dev
 
 Open **http://localhost:3000** for the public site and **http://localhost:3000/admin** for the admin panel.
 
-## 🔐 Admin login
+## 🔐 Admin accounts
 
-By default (when `ADMIN_EMAILS` / `ADMIN_PASSWORDS` are not set) the demo credentials are:
+There are **no built-in, demo or fallback credentials**. Every admin account is a document in the
+MongoDB `admins` collection with a bcrypt-hashed password.
 
-| Email | Password |
-| --- | --- |
-| `admin@vdobogura.org` | `admin123password` |
+### Creating the first administrator
 
-Also accepted: `admin@gusb.org`, `admin@palli-ngo.org`, `admin@gmail.com`, `admin` (same passwords
-`admin123password` / `admin123` / `admin`).
-
-**For production**, set your own via environment variables:
+Set `MONGODB_URI` plus the bootstrap variables and start the server once — if the `admins`
+collection is empty the account is created automatically:
 
 ```env
-ADMIN_EMAILS="you@yourorg.org"
-ADMIN_PASSWORDS="a-strong-password"
+MONGODB_URI="mongodb+srv://..."
+BOOTSTRAP_ADMIN_NAME="Site Administrator"
+BOOTSTRAP_ADMIN_EMAIL="you@yourorg.org"
+BOOTSTRAP_ADMIN_PASSWORD="a-strong-password"
 JWT_SECRET="a-long-random-string"
 ```
+
+The bootstrap runs only while no account exists, so it is safe to leave configured.
+
+### Managing admins from the panel
+
+Log in at **/admin** → **অ্যাডমিন ব্যবস্থাপনা** (Admin Management, visible to the `admin` role) to:
+
+* **add** a new admin (name, email, password of at least 8 characters, role)
+* **edit** name, email, role, active status, or set a new password
+* **delete** an account
+
+Two roles exist: `admin` (full access, including settings, page content and admin management) and
+`editor` (content only). Safety rules enforced by the API: you cannot delete or deactivate your own
+account, and the last active `admin` cannot be removed or demoted. Deleting or deactivating an
+account revokes its session immediately, because every request re-validates the account in MongoDB.
+
+> Without a reachable `MONGODB_URI` the admin panel cannot be used — login fails closed instead of
+> falling back to any hard-coded credential.
 
 ##  Production build
 
@@ -99,7 +116,8 @@ routes, serves `/api` and `/uploads`, and enables HSTS + long-lived static cachi
 
 1. Log in to **/admin** → **ওয়েবসাইট সেটিংস & রঙ** (Website Settings & Colors).
 2. Pick a **Primary** color (headers, footer, banners, dark sections) and an **Accent** color
-   (buttons, highlights, logo border) using the color boxes, or choose a ready-made preset.
+   (buttons, highlights, logo border). Both are chosen **manually** — use the colour wheel, type a
+   `#RRGGBB` HEX code, or enter exact R / G / B values. There are no preset palettes.
 3. **সেভ করুন** — the entire public site recolors immediately (navbar, hero, stats band, banners,
    footer, cards, links, hover states). The choice is persisted.
 
@@ -110,7 +128,8 @@ server/
   config/        cloudinary, ffmpeg, multer, persistence (JSON store)
   controllers/   all API handlers (CRUD + auth + settings + page-content)
   middleware/    auth (JWT), rate limiting
-  models/        mongoose schemas + seed data + in-memory store
+  models/        mongoose schemas (incl. Admin) + empty content store
+  services/      admin account service (MongoDB CRUD + bootstrap)
   routes/api.ts  all /api routes
 src/
   admin/         admin dashboard + per-module managers
@@ -127,17 +146,18 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 | --- | --- | --- |
 | `PORT` | no (default 3000) | HTTP port |
 | `NODE_ENV` | no | Set `production` for the built server |
-| `JWT_SECRET` | **yes in prod** | Signs admin JWTs |
-| `ADMIN_EMAILS` | no | Comma-separated admin emails (overrides demo) |
-| `ADMIN_PASSWORDS` | no | Comma-separated admin passwords (overrides demo) |
-| `MONGODB_URI` | no | Optional Mongo connection (future persistence layer) |
+| `JWT_SECRET` | **yes in prod** | Signs admin JWTs (min. 16 chars; random per restart in dev) |
+| `MONGODB_URI` | **yes** | MongoDB connection — stores all admin accounts |
+| `BOOTSTRAP_ADMIN_EMAIL` | first run | Email of the automatically created first admin |
+| `BOOTSTRAP_ADMIN_PASSWORD` | first run | Password of the first admin (min. 8 chars) |
+| `BOOTSTRAP_ADMIN_NAME` | no | Display name of the first admin |
 | `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET` | no | Use Cloudinary for uploads (incl. video) instead of local disk |
 | `CLOUDINARY_URL` | no | Alternative single-string Cloudinary credential |
 | `MAX_UPLOAD_MB` | no (default 512) | Maximum size of a single uploaded file |
 
 ## 📄 API overview (all under `/api`)
 
-`auth/login`, `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
+`auth/login`, `auth/me`, `admins` (GET/POST/PUT/DELETE, admin role only), `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
 `gallery/albums` (+ `/photos`), `committee`, `partners`, `career` (+ `/applications`),
 `stats`, `settings`, `page-content`. Public reads are open; writes require a valid admin JWT
 (settings & page-content additionally require the `admin` role).

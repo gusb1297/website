@@ -13,7 +13,7 @@ export const ManageNews: React.FC = () => {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [category, setCategory] = useState('News');
-  const [author, setAuthor] = useState('পাবলিক রিলেশনস অফিসার');
+  const [author, setAuthor] = useState('');
   const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -26,6 +26,10 @@ export const ManageNews: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!thumbnailFile) {
+      alert('সংবাদের থাম্বনেইল ছবি নির্বাচন করুন।');
+      return;
+    }
     setSubmitting(true);
 
     try {
@@ -35,11 +39,7 @@ export const ManageNews: React.FC = () => {
       formData.append('category', category);
       formData.append('author', author);
 
-      if (thumbnailFile) {
-        formData.append('thumbnail', thumbnailFile);
-      } else {
-        formData.append('thumbnail', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
-      }
+      formData.append('thumbnail', thumbnailFile);
 
       const res = await fetch('/api/news', {
         method: 'POST',

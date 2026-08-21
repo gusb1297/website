@@ -71,12 +71,19 @@ import {
   getPageContent,
   updatePageContent,
 } from '../controllers/ngoControllers';
+import { getAdmins, postAdmin, putAdmin, removeAdmin } from '../controllers/adminControllers';
 
 const router = Router();
 
 // Auth
 router.post('/auth/login', loginRateLimiter, login);
 router.get('/auth/me', authenticateJwt, getMe);
+
+// Admin user management (MongoDB backed, admins only)
+router.get('/admins', authenticateJwt, requireAdmin, getAdmins);
+router.post('/admins', authenticateJwt, requireAdmin, postAdmin);
+router.put('/admins/:id', authenticateJwt, requireAdmin, putAdmin);
+router.delete('/admins/:id', authenticateJwt, requireAdmin, removeAdmin);
 
 // Hero Slides
 router.get('/hero-slides', getHeroSlides);

@@ -11,24 +11,33 @@ export const MapWidget: React.FC<MapWidgetProps> = ({ settings }) => {
   const { lang } = useLanguage();
   const [selectedOffice, setSelectedOffice] = useState<number>(0);
 
+  /** Build a Google Maps embed URL from coordinates, falling back to the address. */
+  const buildMapUrl = (address?: string, lat?: number, lng?: number) => {
+    const query = lat && lng ? `${lat},${lng}` : (address || '').trim();
+    if (!query) return '';
+    return `https://maps.google.com/maps?q=${encodeURIComponent(query)}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+  };
+
+  const headOfficeAddress = lang === 'en' ? settings.addressEn || settings.address : settings.address;
+
   const offices = [
     {
-      title: lang === 'en' ? 'Head Office (Bogura)' : 'প্রধান কার্যালয় (বগুড়া)',
-      address: settings.address,
+      title: lang === 'en' ? 'Head Office' : 'প্রধান কার্যালয়',
+      address: headOfficeAddress,
       phone: settings.phone,
       email: settings.email,
-      lat: settings.mapLat || 24.8465,
-      lng: settings.mapLng || 89.3777,
-      mapUrl: 'https://maps.google.com/maps?q=Bogura+Sadar+Bogura+Bangladesh&t=&z=15&ie=UTF8&iwloc=&output=embed',
+      lat: settings.mapLat,
+      lng: settings.mapLng,
+      mapUrl: buildMapUrl(headOfficeAddress, settings.mapLat, settings.mapLng),
     },
-    ...(settings.branchAddresses || []).map((branch, idx) => ({
+    ...(settings.branchAddresses || []).map((branch) => ({
       title: branch.name,
       address: branch.address,
       phone: branch.phone,
       email: branch.email,
-      lat: 25.7439 + idx * 0.1,
-      lng: 89.2752 + idx * 0.1,
-      mapUrl: `https://maps.google.com/maps?q=${encodeURIComponent(branch.address + ' Bangladesh')}&t=&z=14&ie=UTF8&iwloc=&output=embed`,
+      lat: undefined as number | undefined,
+      lng: undefined as number | undefined,
+      mapUrl: buildMapUrl(branch.address),
     })),
   ];
 
@@ -118,6 +127,13 @@ export const MapWidget: React.FC<MapWidgetProps> = ({ settings }) => {
 
         {/* Right Side: Interactive Embedded Map */}
         <div className="lg:col-span-7 relative h-[350px] lg:h-auto w-full bg-slate-900">
+          {!currentOffice.mapUrl ? (
+            <div className="w-full h-full flex items-center justify-center text-center text-xs text-white/60 px-6">
+              {lang === 'en'
+                ? 'Add the office address or map coordinates in the admin panel to display the map.'
+                : 'ম্যাপ দেখাতে অ্যাডমিন প্যানেল থেকে অফিসের ঠিকানা বা ম্যাপ কো-অর্ডিনেট যোগ করুন।'}
+            </div>
+          ) : (
           <iframe
             title="NGO Office Map"
             src={currentOffice.mapUrl}
@@ -129,6 +145,7 @@ export const MapWidget: React.FC<MapWidgetProps> = ({ settings }) => {
             referrerPolicy="no-referrer-when-downgrade"
             className="w-full h-full filter contrast-125 opacity-90"
           />
+          )}
         </div>
       </div>
     </div>

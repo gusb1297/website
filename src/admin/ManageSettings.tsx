@@ -3,19 +3,113 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { SiteSettings, BranchOffice } from '../types';
-import { Settings, Save, CheckCircle2, Palette, Plus, Trash2, RotateCcw } from 'lucide-react';
-
-const PRESETS: { name: string; primary: string; accent: string }[] = [
-  { name: 'মূল সবুজ-সোনালি', primary: '#1B3022', accent: '#B38B4D' },
-  { name: 'রাতের সবুজ', primary: '#102A43', accent: '#3E92CC' },
-  { name: 'লাল-গোলাপী', primary: '#5C1A1B', accent: '#D4A017' },
-  { name: 'নীল-বেগুনি', primary: '#1E1B4B', accent: '#F59E0B' },
-  { name: 'টেরাকোটা', primary: '#7C2D12', accent: '#FBBF24' },
-  { name: 'কালো-গোল্ড', primary: '#111827', accent: '#EAB308' },
-];
+import { Settings, Save, CheckCircle2, Palette, Plus, Trash2, Pipette } from 'lucide-react';
 
 const inputCls =
   'w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300 focus:outline-none focus:border-emerald-700';
+
+const HEX_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+const clampChannel = (value: number) => Math.max(0, Math.min(255, Math.round(value || 0)));
+
+const hexToRgb = (hex: string): { r: number; g: number; b: number } => {
+  const clean = HEX_PATTERN.test(hex) ? hex.slice(1) : '000000';
+  return {
+    r: parseInt(clean.slice(0, 2), 16),
+    g: parseInt(clean.slice(2, 4), 16),
+    b: parseInt(clean.slice(4, 6), 16),
+  };
+};
+
+const rgbToHex = (r: number, g: number, b: number) =>
+  `#${[r, g, b].map((c) => clampChannel(c).toString(16).padStart(2, '0')).join('')}`;
+
+/**
+ * Fully manual colour selector: colour wheel, HEX field and R/G/B fields all
+ * edit the same value. No preset palettes - the admin picks any colour.
+ */
+const ColorField: React.FC<{ label: string; value: string; onChange: (hex: string) => void }> = ({
+  label,
+  value,
+  onChange,
+}) => {
+  const [hexDraft, setHexDraft] = useState(value);
+
+  useEffect(() => {
+    setHexDraft(value);
+  }, [value]);
+
+  const rgb = hexToRgb(value);
+
+  const commitHex = (raw: string) => {
+    const next = raw.startsWith('#') ? raw : `#${raw}`;
+    setHexDraft(next);
+    if (HEX_PATTERN.test(next)) onChange(next.toLowerCase());
+  };
+
+  const setChannel = (channel: 'r' | 'g' | 'b', raw: string) => {
+    const next = { ...rgb, [channel]: clampChannel(Number(raw)) };
+    onChange(rgbToHex(next.r, next.g, next.b));
+  };
+
+  const isValid = HEX_PATTERN.test(hexDraft);
+
+  return (
+    <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+      <label className="block text-xs font-bold text-slate-700">{label}</label>
+
+      <div className="flex items-center gap-3">
+        <input
+          type="color"
+          value={HEX_PATTERN.test(value) ? value : '#000000'}
+          onChange={(e) => onChange(e.target.value.toLowerCase())}
+          className="w-14 h-14 rounded-xl border border-slate-300 cursor-pointer bg-white p-1"
+          title="কালার হুইল থেকে বেছে নিন"
+        />
+        <div className="flex-1">
+          <div className="relative">
+            <Pipette className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={hexDraft}
+              onChange={(e) => commitHex(e.target.value)}
+              maxLength={7}
+              spellCheck={false}
+              className={`${inputCls} pl-8 font-mono uppercase ${isValid ? '' : 'border-red-400 text-red-600'}`}
+              placeholder="#1B3022"
+            />
+          </div>
+          {!isValid && <p className="text-[10px] text-red-500 mt-1">HEX কোডটি #RRGGBB ফরম্যাটে লিখুন।</p>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {(['r', 'g', 'b'] as const).map((channel) => (
+          <div key={channel}>
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">
+              {channel}
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={255}
+              value={rgb[channel]}
+              onChange={(e) => setChannel(channel, e.target.value)}
+              className={`${inputCls} font-mono`}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div
+        className="h-10 rounded-xl border border-slate-300 flex items-center justify-center text-white text-[10px] font-bold uppercase tracking-widest"
+        style={{ backgroundColor: HEX_PATTERN.test(value) ? value : '#000000' }}
+      >
+        প্রিভিউ
+      </div>
+    </div>
+  );
+};
 
 export const ManageSettings: React.FC = () => {
   const { token } = useAuth();
@@ -168,98 +262,21 @@ export const ManageSettings: React.FC = () => {
           <Palette className="w-5 h-5 text-amber-500" /> সাইট-ওয়াইড রঙ (Theme Colors)
         </h3>
         <p className="text-xs text-slate-500 font-sans">
-          নিচের কালার বক্স থেকে পুরো ওয়েবসাইটের প্রধান (dark) রঙ ও অ্যাকসেন্ট (gold) রঙ পরিবর্তন করুন।
-          নেভিগেশন, ফুটার, ব্যানার, বাটন — সব জায়গায় সাথে সাথে প্রয়োগ হবে।
+          কালার হুইল থেকে যেকোনো রঙ বেছে নিন, অথবা HEX কোড কিংবা R/G/B মান হাতে লিখে দিন। প্রতিটি রঙ সম্পূর্ণ
+          ম্যানুয়ালি নির্বাচনযোগ্য — নেভিগেশন, ফুটার, ব্যানার ও বাটনে সাথে সাথে প্রয়োগ হবে।
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Primary color */}
-          <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
-            <label className="block text-xs font-bold text-slate-700">প্রাইমারি রঙ (হেডার, ফুটার, ব্যানার)</label>
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                value={primaryColor}
-                onChange={(e) => setPrimaryColor(e.target.value)}
-                className="w-14 h-14 rounded-xl border border-slate-300 cursor-pointer bg-white p-1"
-                title="Primary color picker"
-              />
-              <input
-                type="text"
-                value={primaryColor}
-                onChange={(e) => setPrimaryColor(e.target.value)}
-                pattern="#?[0-9a-fA-F]{6}"
-                className={`${inputCls} font-mono uppercase`}
-              />
-            </div>
-            <div
-              className="h-10 rounded-xl border border-slate-300 flex items-center justify-center text-white text-[10px] font-bold uppercase tracking-widest"
-              style={{ backgroundColor: primaryColor }}
-            >
-              প্রিভিউ
-            </div>
-          </div>
-
-          {/* Accent color */}
-          <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
-            <label className="block text-xs font-bold text-slate-700">অ্যাকসেন্ট রঙ (বাটন, হাইলাইট, লোগো বর্ডার)</label>
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                value={accentColor}
-                onChange={(e) => setAccentColor(e.target.value)}
-                className="w-14 h-14 rounded-xl border border-slate-300 cursor-pointer bg-white p-1"
-                title="Accent color picker"
-              />
-              <input
-                type="text"
-                value={accentColor}
-                onChange={(e) => setAccentColor(e.target.value)}
-                pattern="#?[0-9a-fA-F]{6}"
-                className={`${inputCls} font-mono uppercase`}
-              />
-            </div>
-            <div
-              className="h-10 rounded-xl border border-slate-300 flex items-center justify-center text-white text-[10px] font-bold uppercase tracking-widest"
-              style={{ backgroundColor: accentColor }}
-            >
-              প্রিভিউ
-            </div>
-          </div>
-        </div>
-
-        {/* Presets */}
-        <div className="space-y-2">
-          <p className="text-xs font-bold text-slate-600">রেডিমেড থিম প্রিসেট:</p>
-          <div className="flex flex-wrap gap-2">
-            {PRESETS.map((p) => (
-              <button
-                key={p.name}
-                type="button"
-                onClick={() => {
-                  setPrimaryColor(p.primary);
-                  setAccentColor(p.accent);
-                }}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-300 hover:border-emerald-700 bg-white text-[11px] font-bold text-slate-700 transition-all"
-              >
-                <span className="flex -space-x-1">
-                  <span className="w-5 h-5 rounded-full border border-white" style={{ backgroundColor: p.primary }} />
-                  <span className="w-5 h-5 rounded-full border border-white" style={{ backgroundColor: p.accent }} />
-                </span>
-                {p.name}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => {
-                setPrimaryColor('#1B3022');
-                setAccentColor('#B38B4D');
-              }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-300 hover:border-red-400 bg-white text-[11px] font-bold text-slate-500 transition-all"
-            >
-              <RotateCcw className="w-3.5 h-3.5" /> ডিফল্টে ফিরে যান
-            </button>
-          </div>
+          <ColorField
+            label="প্রাইমারি রঙ (হেডার, ফুটার, ব্যানার)"
+            value={primaryColor}
+            onChange={setPrimaryColor}
+          />
+          <ColorField
+            label="অ্যাকসেন্ট রঙ (বাটন, হাইলাইট, লোগো বর্ডার)"
+            value={accentColor}
+            onChange={setAccentColor}
+          />
         </div>
       </div>
 

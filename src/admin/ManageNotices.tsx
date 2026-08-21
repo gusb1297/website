@@ -9,7 +9,7 @@ export const ManageNotices: React.FC = () => {
   const { data: notices, refetch } = useFetch<Notice[]>('/api/notices?all=true');
 
   const [title, setTitle] = useState('');
-  const [referenceNo, setReferenceNo] = useState('GUSB/NOTICE/2026/001');
+  const [referenceNo, setReferenceNo] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -33,11 +33,7 @@ export const ManageNotices: React.FC = () => {
       formData.append('title', title);
       formData.append('referenceNo', referenceNo);
       if (expiryDate) formData.append('expiryDate', expiryDate);
-      if (pdfFile) {
-        formData.append('pdfFile', pdfFile);
-      } else {
-        formData.append('pdfFile', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
-      }
+      formData.append('pdfFile', pdfFile);
 
       const res = await fetch('/api/notices', {
         method: 'POST',

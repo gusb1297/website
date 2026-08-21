@@ -14,6 +14,7 @@ import { ManageStats } from './ManageStats';
 import { ManageCommittee } from './ManageCommittee';
 import { ManagePages } from './ManagePages';
 import { ManageSettings } from './ManageSettings';
+import { ManageAdmins } from './ManageAdmins';
 import {
   Sliders,
   Sprout,
@@ -30,6 +31,7 @@ import {
   BarChart3,
   Handshake,
   LayoutTemplate,
+  UserCog,
 } from 'lucide-react';
 
 type TabId =
@@ -45,7 +47,8 @@ type TabId =
   | 'stats'
   | 'committee'
   | 'content'
-  | 'settings';
+  | 'settings'
+  | 'admins';
 
 export const Dashboard: React.FC = () => {
   const { user, logout, isAuthenticated } = useAuth();
@@ -88,6 +91,11 @@ export const Dashboard: React.FC = () => {
     { id: 'settings', label: 'ওয়েবসাইট সেটিংস & রঙ', icon: <Settings className="w-4 h-4" /> },
   ];
 
+  // Only full administrators can manage other admin accounts.
+  if (user?.role === 'admin') {
+    navItems.push({ id: 'admins', label: 'অ্যাডমিন ব্যবস্থাপনা', icon: <UserCog className="w-4 h-4" /> });
+  }
+
   return (
     <div className="min-h-screen bg-[#faf8f5]">
       {/* Top Header Bar */}
@@ -98,7 +106,7 @@ export const Dashboard: React.FC = () => {
             <div>
               <h1 className="text-2xl font-serif font-bold text-white">অ্যাডমিন ড্যাশবোর্ড</h1>
               <p className="text-xs text-emerald-200">
-                লগইন অ্যাকাউন্ট: <strong>{user?.name || 'এডমিন সংস্থাপ্রধান'}</strong> ({user?.email})
+                লগইন অ্যাকাউন্ট: <strong>{user?.name}</strong> ({user?.email})
               </p>
             </div>
           </div>
@@ -172,6 +180,7 @@ export const Dashboard: React.FC = () => {
             {activeTab === 'partners' && <ManagePartners />}
             {activeTab === 'stats' && <ManageStats />}
             {activeTab === 'settings' && <ManageSettings />}
+            {activeTab === 'admins' && user?.role === 'admin' && <ManageAdmins />}
           </div>
         </div>
       </div>

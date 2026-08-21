@@ -32,11 +32,7 @@ export const ManagePublications: React.FC = () => {
       formData.append('title', title);
       formData.append('type', type);
       formData.append('year', year);
-      if (pdfFile) {
-        formData.append('pdfFile', pdfFile);
-      } else {
-        formData.append('pdfFile', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
-      }
+      formData.append('pdfFile', pdfFile);
 
       const res = await fetch('/api/publications', {
         method: 'POST',

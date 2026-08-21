@@ -10,7 +10,7 @@ export const ManageHeroSlider: React.FC = () => {
 
   const [headline, setHeadline] = useState('');
   const [subtext, setSubtext] = useState('');
-  const [buttonText, setButtonText] = useState('আমাদের কার্যক্রম');
+  const [buttonText, setButtonText] = useState('');
   const [buttonLink, setButtonLink] = useState('/programs');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [creating, setCreating] = useState(false);
@@ -24,6 +24,10 @@ export const ManageHeroSlider: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!imageFile) {
+      alert('স্লাইডের জন্য একটি ছবি নির্বাচন করুন।');
+      return;
+    }
     setCreating(true);
 
     try {
@@ -34,9 +38,7 @@ export const ManageHeroSlider: React.FC = () => {
       formData.append('buttonLink', buttonLink);
       formData.append('isActive', 'true');
 
-      if (imageFile) {
-        formData.append('image', imageFile);
-      }
+      formData.append('image', imageFile);
 
       const res = await fetch('/api/hero-slides', {
         method: 'POST',

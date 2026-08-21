@@ -35,6 +35,10 @@ export const ManageCommittee: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!photoFile) {
+      alert('সদস্যের ছবি নির্বাচন করুন।');
+      return;
+    }
     setCreating(true);
     try {
       const formData = new FormData();
@@ -44,11 +48,7 @@ export const ManageCommittee: React.FC = () => {
       formData.append('bio', bio);
       formData.append('email', email);
       formData.append('phone', phone);
-      if (photoFile) {
-        formData.append('photo', photoFile);
-      } else {
-        formData.append('photo', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80');
-      }
+      formData.append('photo', photoFile);
       const res = await fetch('/api/committee', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },

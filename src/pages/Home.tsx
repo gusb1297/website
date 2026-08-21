@@ -82,27 +82,15 @@ export const Home: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
             <div className="lg:col-span-6 space-y-6">
               <span className="text-[color:var(--site-accent)] text-xs font-bold uppercase tracking-[0.3em] block">
-                {pick(home?.establishedBadge, lang, lang === 'en' ? '15 Years of Trusted Social Service' : '১৫ বছরের বিশ্বস্ত সামাজিক সেবা')}
+                {pick(home?.establishedBadge, lang, '')}
               </span>
 
               <h2 className="text-2xl sm:text-3xl lg:text-4xl xl:text-5xl font-serif font-bold text-[color:var(--site-primary)] leading-tight">
-                {pick(
-                  home?.teaserTitle,
-                  lang,
-                  lang === 'en'
-                    ? 'Village Development Organization Bogura (GUSB) - Standing Beside Rural Communities'
-                    : 'গ্রাম উন্নয়ন সংস্থা বগুড়া (GUSB) - প্রান্তিক মানুষের পাশে নিরন্তর'
-                )}
+                {pick(home?.teaserTitle, lang, '')}
               </h2>
 
               <p className="text-sm sm:text-base text-[color:var(--site-primary)]/70 leading-relaxed font-sans">
-                {pick(
-                  home?.teaserText,
-                  lang,
-                  lang === 'en'
-                    ? 'Village Development Organization Bogura (GUSB) is a premier non-governmental organization established in 2010. We are dedicated to empowering disadvantaged communities, especially women and children, across Bogura and North Bengal.'
-                    : 'গ্রাম উন্নয়ন সংস্থা বগুড়া (Gram Unnayan Sangstha Bogura - GUSB) ২০১০ সালে প্রতিষ্ঠিত উত্তরবঙ্গের একটি অগ্রগামী নন-গভর্নমেন্টাল অর্গানাইজেশন (NGO)।'
-                )}
+                {pick(home?.teaserText, lang, '')}
               </p>
 
               <div className="grid grid-cols-2 gap-4 pt-2">
@@ -111,13 +99,7 @@ export const Home: React.FC = () => {
                     {pick(home?.visionTitle, lang, lang === 'en' ? 'Our Vision' : 'আমাদের ভিশন')}
                   </h4>
                   <p className="text-xs text-[color:var(--site-primary)]/70 mt-1 font-sans">
-                    {pick(
-                      home?.visionText,
-                      lang,
-                      lang === 'en'
-                        ? 'Building a poverty-free, self-reliant, and equitable rural Bangladesh.'
-                        : 'দারিদ্র্যমুক্ত, স্বাবলম্বী ও সমতাভিত্তিক গ্রাম বাংলাদেশ গড়ে তোলা।'
-                    )}
+                    {pick(home?.visionText, lang, '')}
                   </p>
                 </div>
 
@@ -126,13 +108,7 @@ export const Home: React.FC = () => {
                     {pick(home?.missionTitle, lang, lang === 'en' ? 'Our Mission' : 'আমাদের মিশন')}
                   </h4>
                   <p className="text-xs text-[color:var(--site-primary)]/70 mt-1 font-sans">
-                    {pick(
-                      home?.missionText,
-                      lang,
-                      lang === 'en'
-                        ? 'Delivering the benefits of microfinance, education, healthcare, and sustainable agricultural technology.'
-                        : 'ক্ষুদ্রঋণ, শিক্ষা, স্বাস্থ্য ও কৃষি প্রযুক্তির সুফল পৌঁছে দেওয়া।'
-                    )}
+                    {pick(home?.missionText, lang, '')}
                   </p>
                 </div>
               </div>
@@ -148,31 +124,29 @@ export const Home: React.FC = () => {
               </div>
             </div>
 
-            <div className="lg:col-span-6 relative">
-              <div className="relative overflow-hidden border border-[color:var(--site-primary)]/20 shadow-2xl">
-                <img
-                  src={home?.teaserImage || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=1200&q=80'}
-                  alt="GUSB Rural Development"
-                  className="w-full h-auto object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[color:var(--site-primary)]/90 via-transparent to-transparent" />
+            {home?.teaserImage && (
+              <div className="lg:col-span-6 relative">
+                <div className="relative overflow-hidden border border-[color:var(--site-primary)]/20 shadow-2xl">
+                  <img
+                    src={home.teaserImage}
+                    alt={pick(home?.teaserImageLabel, lang, '')}
+                    className="w-full h-auto object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[color:var(--site-primary)]/90 via-transparent to-transparent" />
 
-                <div className="absolute bottom-6 left-6 right-6 p-6 bg-[color:var(--site-primary)]/90 border border-[color:var(--site-accent)]/30 text-white">
-                  <p className="text-[10px] text-[color:var(--site-accent)] font-bold uppercase tracking-[0.2em]">
-                    {pick(home?.teaserImageLabel, lang, lang === 'en' ? 'Real Field Impact' : 'মাঠ পর্যায়ের বাস্তব প্রভাব')}
-                  </p>
-                  <p className="text-sm font-serif font-bold text-[color:var(--site-cream)] mt-1">
-                    {pick(
-                      home?.teaserImageCaption,
-                      lang,
-                      lang === 'en'
-                        ? 'Direct services across 28 sub-districts in Kurigram, Gaibandha, and Rangpur.'
-                        : 'কুড়িগ্রাম, গাইবান্ধা ও রংপুরের ২৮টি উপজেলায় আমাদের প্রত্যক্ষ সেবা বিস্তৃত।'
-                    )}
-                  </p>
+                  {(pick(home?.teaserImageLabel, lang, '') || pick(home?.teaserImageCaption, lang, '')) && (
+                    <div className="absolute bottom-6 left-6 right-6 p-6 bg-[color:var(--site-primary)]/90 border border-[color:var(--site-accent)]/30 text-white">
+                      <p className="text-[10px] text-[color:var(--site-accent)] font-bold uppercase tracking-[0.2em]">
+                        {pick(home?.teaserImageLabel, lang, '')}
+                      </p>
+                      <p className="text-sm font-serif font-bold text-[color:var(--site-cream)] mt-1">
+                        {pick(home?.teaserImageCaption, lang, '')}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </section>
@@ -186,14 +160,10 @@ export const Home: React.FC = () => {
           <div className="flex flex-col md:flex-row md:items-end justify-between mb-12 gap-4">
             <div>
               <span className="text-[color:var(--site-accent)] text-xs font-bold uppercase tracking-[0.3em] block">
-                {pick(home?.programsBadge, lang, lang === 'en' ? 'Our Core Activities' : 'আমাদের মূল কার্যক্রম')}
+                {pick(home?.programsBadge, lang, lang === 'en' ? 'Our Activities' : 'আমাদের কার্যক্রম')}
               </span>
               <h2 className="text-2xl sm:text-3xl lg:text-4xl font-serif font-bold text-[color:var(--site-primary)] mt-1">
-                {pick(
-                  home?.programsTitle,
-                  lang,
-                  lang === 'en' ? 'Key Projects for Sustainable Community Development' : 'টেকসই সমাজ বিনির্মাণে প্রধান প্রজেক্টসমূহ'
-                )}
+                {pick(home?.programsTitle, lang, lang === 'en' ? 'Our Projects' : 'প্রজেক্টসমূহ')}
               </h2>
             </div>
 
@@ -220,25 +190,15 @@ export const Home: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
             <div className="lg:col-span-5 space-y-6">
               <span className="text-[color:var(--site-accent)] text-xs font-bold uppercase tracking-[0.3em] block">
-                {pick(home?.videoBadge, lang, lang === 'en' ? 'Video Documentaries' : 'ভিডিও প্রামাণ্যচিত্র')}
+                {pick(home?.videoBadge, lang, lang === 'en' ? 'Videos' : 'ভিডিও')}
               </span>
 
               <h2 className="text-2xl sm:text-3xl lg:text-4xl font-serif font-bold text-white leading-tight">
-                {pick(
-                  home?.videoTitle,
-                  lang,
-                  lang === 'en' ? 'Real Impact & Stories of Hope from Riverine Char Lands' : 'চরাঞ্চলে পরিবর্তনের গল্প ও বাস্তব চিত্র'
-                )}
+                {pick(home?.videoTitle, lang, lang === 'en' ? 'Video Gallery' : 'ভিডিও গ্যালারি')}
               </h2>
 
               <p className="text-sm sm:text-base text-[color:var(--site-cream)]/90 leading-relaxed font-sans">
-                {pick(
-                  home?.videoText,
-                  lang,
-                  lang === 'en'
-                    ? 'Watch official video documentaries showing transformed lives, microfinance entrepreneur successes, and field work across rural communities.'
-                    : 'আমাদের অফিশিয়াল ভিডিও গ্যালারিতে চরাঞ্চলের সুবিধা বঞ্চিত মানুষের বদলে যাওয়া জীবন, ক্ষুদ্রঋণ উদ্যোক্তাদের সাফল্যের গল্প এবং মাঠপর্যায়ের কাজ দেখুন।'
-                )}
+                {pick(home?.videoText, lang, '')}
               </p>
 
               <Link
@@ -266,11 +226,7 @@ export const Home: React.FC = () => {
                 {pick(home?.newsBadge, lang, lang === 'en' ? 'News & Events' : 'সংবাদ ও ইভেন্ট')}
               </span>
               <h2 className="text-2xl sm:text-3xl lg:text-4xl font-serif font-bold text-[color:var(--site-primary)] mt-1">
-                {pick(
-                  home?.newsTitle,
-                  lang,
-                  lang === 'en' ? 'Latest News & Field Updates from GUSB' : 'গ্রাম উন্নয়ন সংস্থা বগুড়া (GUSB) এর সাম্প্রতিক খবরাখবর'
-                )}
+                {pick(home?.newsTitle, lang, lang === 'en' ? 'Latest News' : 'সাম্প্রতিক খবর')}
               </h2>
             </div>
 
@@ -296,7 +252,7 @@ export const Home: React.FC = () => {
         <section className="py-12 sm:py-[72px] bg-white border-y border-[color:var(--site-primary)]/10">
           <div className="container text-center">
             <p className="text-xs font-bold text-[color:var(--site-primary)]/60 uppercase tracking-[0.3em] mb-8">
-              {pick(home?.partnersTitle, lang, lang === 'en' ? 'Our Partners & Donors' : 'আমাদের সহযোগী ও তহবিল অংশীদারবৃন্দ (Partners & Donors)')}
+              {pick(home?.partnersTitle, lang, lang === 'en' ? 'Our Partners & Donors' : 'আমাদের সহযোগী ও অংশীদার')}
             </p>
 
             <div className="flex flex-wrap items-center justify-center gap-8 md:gap-16">

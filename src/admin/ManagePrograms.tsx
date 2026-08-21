@@ -33,6 +33,10 @@ export const ManagePrograms: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!coverFile) {
+      alert('প্রজেক্টের কভার ছবি নির্বাচন করুন।');
+      return;
+    }
     setSubmitting(true);
 
     try {
@@ -45,11 +49,7 @@ export const ManagePrograms: React.FC = () => {
       formData.append('beneficiariesCount', String(beneficiariesCount));
       formData.append('districtsCovered', String(districtsCovered));
 
-      if (coverFile) {
-        formData.append('coverImage', coverFile);
-      } else {
-        formData.append('coverImage', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
-      }
+      formData.append('coverImage', coverFile);
 
       const res = await fetch('/api/programs', {
         method: 'POST',
