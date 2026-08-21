@@ -34,7 +34,8 @@ export const authenticateJwt = async (req: AuthRequest, res: Response, next: Nex
   if (!isDatabaseReady()) {
     return res.status(503).json({
       error: 'database_unavailable',
-      message: 'Admin accounts are stored in MongoDB, which is currently unreachable.',
+      message:
+        'MongoDB is not reachable, so this session cannot be verified. Check MONGODB_URI and Atlas Network Access.',
     });
   }
 

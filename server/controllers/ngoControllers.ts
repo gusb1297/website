@@ -7,7 +7,7 @@ import { uploadToCloudinary, storeFile, destroyCloudinaryAsset } from '../config
 import { parseVideoLink, formatDuration } from '../utils/videoSources';
 import { persistStore } from '../config/persistence';
 import { getJwtSecret } from '../config/env';
-import { AdminServiceError, verifyCredentials } from '../services/adminService';
+import { AdminServiceError, getAuthStatus, setupFirstAdmin, verifyCredentials } from '../services/adminService';
 import { AuthRequest } from '../middleware/auth';
 import { memoryStore, DEFAULT_THEME } from '../models/schemas';
 import {
@@ -69,6 +69,31 @@ export const uploadDirectFile = async (req: Request, res: Response) => {
 };
 
 // 1. AUTH CONTROLLER
+export const authStatus = async (_req: Request, res: Response) => {
+  try {
+    res.json(await getAuthStatus());
+  } catch (err) {
+    console.error('[auth] Status error:', err);
+    res.status(500).json({ error: 'server_error', message: 'সার্ভারে সমস্যা হয়েছে।' });
+  }
+};
+
+export const setupAdmin = async (req: Request, res: Response) => {
+  try {
+    const admin = await setupFirstAdmin(req.body || {});
+    return res.status(201).json({
+      message: 'প্রথম অ্যাডমিন অ্যাকাউন্ট তৈরি হয়েছে। এখন লগইন করুন।',
+      user: { id: admin.id, name: admin.name, email: admin.email, role: admin.role },
+    });
+  } catch (err) {
+    if (err instanceof AdminServiceError) {
+      return res.status(err.status).json({ error: err.code, message: err.message });
+    }
+    console.error('[auth] Setup error:', err);
+    return res.status(500).json({ error: 'server_error', message: 'সার্ভারে সমস্যা হয়েছে।' });
+  }
+};
+
 export const login = async (req: Request, res: Response) => {
   const { email, password } = req.body || {};
   if (!email || !password) {

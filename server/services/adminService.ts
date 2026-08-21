@@ -1,15 +1,20 @@
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import { MAdmin } from '../models/schemas';
+import { describeMongoStatus, isDatabaseReady as mongoIsReady, MongoState } from '../config/mongo';
 
 /**
  * Admin account management.
  *
  * Every admin account lives in MongoDB with a bcrypt-hashed password. There are
- * no built-in / demo credentials anywhere in the codebase: the very first
- * account is created from BOOTSTRAP_ADMIN_EMAIL + BOOTSTRAP_ADMIN_PASSWORD the
- * first time the server starts against an empty admins collection, and every
- * further account is created from the admin panel.
+ * no built-in / demo credentials anywhere in the codebase. The first account is
+ * created by any of:
+ *   1. BOOTSTRAP_ADMIN_EMAIL + BOOTSTRAP_ADMIN_PASSWORD on an empty collection
+ *   2. POST /api/auth/setup from the /admin/login first-run form
+ *   3. `npm run create-admin`
+ *
+ * Do not insert users from the MongoDB Atlas UI — a plaintext password will
+ * never match, because login compares against `passwordHash` (bcrypt).
  */
 
 export const MIN_PASSWORD_LENGTH = 8;
@@ -52,17 +57,65 @@ export interface AdminInput {
 
 /** True when the MongoDB connection is usable. */
 export function isDatabaseReady(): boolean {
-  return mongoose.connection.readyState === 1;
+  return mongoIsReady();
+}
+
+function databaseUnavailableError(): AdminServiceError {
+  const status = describeMongoStatus();
+  return new AdminServiceError(503, 'database_unavailable', status.hint);
 }
 
 function assertDatabase(): void {
   if (!isDatabaseReady()) {
+    throw databaseUnavailableError();
+  }
+}
+
+export interface AuthStatus {
+  database: MongoState;
+  setupRequired: boolean;
+  message: string;
+}
+
+/** Public status for the login page (no secrets). */
+export async function getAuthStatus(): Promise<AuthStatus> {
+  const mongo = describeMongoStatus();
+  if (!mongo.connected) {
+    return {
+      database: mongo.state,
+      setupRequired: false,
+      message: mongo.hint,
+    };
+  }
+
+  const total = await MAdmin.countDocuments({});
+  if (total === 0) {
+    return {
+      database: 'connected',
+      setupRequired: true,
+      message:
+        'No admin account exists yet. Create the first one on this page — you do not add users from the MongoDB Atlas panel.',
+    };
+  }
+
+  return { database: 'connected', setupRequired: false, message: '' };
+}
+
+/**
+ * Create the very first administrator. Refuses to run once any account exists,
+ * so it cannot be used as a backdoor after setup.
+ */
+export async function setupFirstAdmin(input: AdminInput): Promise<AdminDTO> {
+  assertDatabase();
+  const total = await MAdmin.countDocuments({});
+  if (total > 0) {
     throw new AdminServiceError(
-      503,
-      'database_unavailable',
-      'Admin accounts are stored in MongoDB. Set MONGODB_URI and make sure the database is reachable.'
+      409,
+      'already_setup',
+      'একজন অ্যাডমিন আগে থেকেই আছেন। লগইন ফর্ম ব্যবহার করুন।'
     );
   }
+  return createAdmin({ ...input, role: 'admin', isActive: true });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -289,7 +342,7 @@ export async function bootstrapAdminFromEnv(): Promise<void> {
 
   if (!email || !password) {
     console.warn(
-      '[auth] No admin account exists yet. Set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD in .env and restart to create the first administrator.'
+      '[auth] No admin account exists yet. Open /admin/login to create the first administrator, or set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD and restart. Do not insert users from the MongoDB Atlas panel.'
     );
     return;
   }

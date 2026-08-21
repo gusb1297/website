@@ -4,9 +4,9 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import mongoose from 'mongoose';
 import apiRouter from './server/routes/api';
 import { loadStore, flushStore } from './server/config/persistence';
+import { connectMongo, describeMongoStatus, startMongoReconnectLoop } from './server/config/mongo';
 import { bootstrapAdminFromEnv } from './server/services/adminService';
 import { getJwtSecret } from './server/config/env';
 
@@ -75,23 +75,20 @@ async function startServer() {
 
   // Admin accounts live in MongoDB. Without a connection nobody can sign in to
   // the admin panel (there are no fallback / demo credentials by design).
-  if (process.env.MONGODB_URI) {
-    try {
-      await mongoose.connect(process.env.MONGODB_URI);
-      console.log('Successfully connected to MongoDB database!');
-      await bootstrapAdminFromEnv();
-    } catch (err) {
-      console.error('MongoDB connection error - admin login is disabled until it is reachable:', err);
-    }
-  } else {
-    console.warn(
-      'MONGODB_URI is not set. Admin accounts are stored in MongoDB, so the admin panel cannot be used until it is configured.'
-    );
+  const mongoOk = await connectMongo();
+  if (mongoOk) {
+    await bootstrapAdminFromEnv();
   }
+  startMongoReconnectLoop(() => bootstrapAdminFromEnv());
 
   // Healthcheck endpoint (before the API router)
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', time: new Date().toISOString() });
+    const mongo = describeMongoStatus();
+    res.json({
+      status: 'ok',
+      time: new Date().toISOString(),
+      mongo: { configured: mongo.configured, connected: mongo.connected, state: mongo.state },
+    });
   });
 
   // API Routes
