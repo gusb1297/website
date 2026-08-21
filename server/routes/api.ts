@@ -6,6 +6,8 @@ import { createRateLimit } from '../middleware/rateLimit';
 const loginRateLimiter = createRateLimit(20, 15 * 60 * 1000);
 import {
   login,
+  authStatus,
+  setupAdmin,
   getMe,
   uploadDirectFile,
   getHeroSlides,
@@ -76,6 +78,8 @@ import { getAdmins, postAdmin, putAdmin, removeAdmin } from '../controllers/admi
 const router = Router();
 
 // Auth
+router.get('/auth/status', authStatus);
+router.post('/auth/setup', loginRateLimiter, setupAdmin);
 router.post('/auth/login', loginRateLimiter, login);
 router.get('/auth/me', authenticateJwt, getMe);
 

@@ -63,15 +63,26 @@ Open **http://localhost:3000** for the public site and **http://localhost:3000/a
 ## 🔐 Admin accounts
 
 There are **no built-in, demo or fallback credentials**. Every admin account is a document in the
-MongoDB `admins` collection with a bcrypt-hashed password.
+MongoDB `admins` collection with a **bcrypt-hashed** password (`passwordHash`).
+
+### Do **not** add admins from the MongoDB Atlas panel
+
+The Atlas / Compass UI is the wrong place to create login users. A document with a plaintext
+`password` field will **never** log in — the server only compares bcrypt hashes. Use one of the
+three methods below; they all hash the password for you.
 
 ### Creating the first administrator
+
+Pick **one**:
+
+**1. Environment bootstrap (recommended for production)**
 
 Set `MONGODB_URI` plus the bootstrap variables and start the server once — if the `admins`
 collection is empty the account is created automatically:
 
 ```env
-MONGODB_URI="mongodb+srv://..."
+MONGODB_URI="mongodb+srv://USER:PASSWORD@cluster.mongodb.net/gusb?retryWrites=true&w=majority"
+MONGODB_DB="gusb"
 BOOTSTRAP_ADMIN_NAME="Site Administrator"
 BOOTSTRAP_ADMIN_EMAIL="you@yourorg.org"
 BOOTSTRAP_ADMIN_PASSWORD="a-strong-password"
@@ -80,7 +91,49 @@ JWT_SECRET="a-long-random-string"
 
 The bootstrap runs only while no account exists, so it is safe to leave configured.
 
-### Managing admins from the panel
+**2. First-run form on the website**
+
+Start the server with only `MONGODB_URI` set, then open **/admin/login**. When MongoDB is connected
+and the `admins` collection is empty, the page shows **প্রথম অ্যাডমিন তৈরি করুন** instead of the
+login form. Submit name + email + password (min. 8 characters). After that, log in as usual.
+
+**3. CLI**
+
+```bash
+npm run create-admin -- --email you@yourorg.org --password 'a-strong-password' --name 'Site Administrator'
+```
+
+### If login says MongoDB is unreachable
+
+`MONGODB_URI` being present in `.env` is not enough — the process must actually connect. Check:
+
+1. **Atlas → Network Access** — allow this server’s IP, or `0.0.0.0/0` while testing.
+2. **Atlas → Database Access** — username / password must match the URI. URL-encode special
+   characters in the password (`@` → `%40`, `#` → `%23`, `%` → `%25`).
+3. **Database name** — put it in the URI path (`...mongodb.net/gusb?...`). If the URI has no db
+   name, the app uses `MONGODB_DB` (default `gusb`) instead of mongoose’s `test` database.
+4. Restart the app after changing env vars. `GET /api/health` reports `{ mongo: { connected } }`.
+
+### Emergency insert in Atlas (only if you must)
+
+Only do this if the app cannot run the methods above. Collection: **`admins`** (in the `gusb`
+database, not `test`). Generate a hash locally, then insert **`passwordHash`** — never `password`:
+
+```bash
+node -e "require('bcryptjs').hash('YourPasswordHere', 12).then(console.log)"
+```
+
+```json
+{
+  "name": "Site Administrator",
+  "email": "you@yourorg.org",
+  "passwordHash": "<bcrypt hash from the command above>",
+  "role": "admin",
+  "isActive": true
+}
+```
+
+### Managing further admins from the panel
 
 Log in at **/admin** → **অ্যাডমিন ব্যবস্থাপনা** (Admin Management, visible to the `admin` role) to:
 
@@ -125,12 +178,13 @@ routes, serves `/api` and `/uploads`, and enables HSTS + long-lived static cachi
 
 ```
 server/
-  config/        cloudinary, ffmpeg, multer, persistence (JSON store)
+  config/        cloudinary, ffmpeg, multer, mongo, persistence (JSON store)
   controllers/   all API handlers (CRUD + auth + settings + page-content)
   middleware/    auth (JWT), rate limiting
   models/        mongoose schemas (incl. Admin) + empty content store
-  services/      admin account service (MongoDB CRUD + bootstrap)
+  services/      admin account service (MongoDB CRUD + bootstrap + first-run setup)
   routes/api.ts  all /api routes
+scripts/create-admin.ts  CLI to add an admin (`npm run create-admin`)
 src/
   admin/         admin dashboard + per-module managers
   components/    Navbar, Footer, HeroSlider, StatsCounter, cards, map, video, PDF
@@ -148,6 +202,7 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 | `NODE_ENV` | no | Set `production` for the built server |
 | `JWT_SECRET` | **yes in prod** | Signs admin JWTs (min. 16 chars; random per restart in dev) |
 | `MONGODB_URI` | **yes** | MongoDB connection — stores all admin accounts |
+| `MONGODB_DB` | no (default `gusb`) | Database name when the URI path does not include one |
 | `BOOTSTRAP_ADMIN_EMAIL` | first run | Email of the automatically created first admin |
 | `BOOTSTRAP_ADMIN_PASSWORD` | first run | Password of the first admin (min. 8 chars) |
 | `BOOTSTRAP_ADMIN_NAME` | no | Display name of the first admin |
@@ -157,7 +212,7 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 
 ## 📄 API overview (all under `/api`)
 
-`auth/login`, `auth/me`, `admins` (GET/POST/PUT/DELETE, admin role only), `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
+`auth/status` (Mongo + whether first-run setup is needed), `auth/setup` (create the first admin when the collection is empty), `auth/login`, `auth/me`, `admins` (GET/POST/PUT/DELETE, admin role only), `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
 `gallery/albums` (+ `/photos`), `committee`, `partners`, `career` (+ `/applications`),
 `stats`, `settings`, `page-content`. Public reads are open; writes require a valid admin JWT
 (settings & page-content additionally require the `admin` role).
