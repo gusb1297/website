@@ -160,11 +160,21 @@ export interface StatItem {
   order: number;
 }
 
+export type AdminRole = 'admin' | 'editor';
+
 export interface AdminUser {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'editor';
+  role: AdminRole;
+}
+
+/** Admin account as returned by /api/admins (stored in MongoDB). */
+export interface AdminAccount extends AdminUser {
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  lastLoginAt?: string | null;
 }
 
 export interface BranchOffice {

@@ -40,15 +40,15 @@ export const ManageGallery: React.FC = () => {
 
   const handleCreateAlbum = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!albumCoverFile) {
+      alert('অ্যালবামের কভার ছবি নির্বাচন করুন।');
+      return;
+    }
     try {
       const formData = new FormData();
       formData.append('title', albumTitle);
       if (albumDescription) formData.append('description', albumDescription);
-      if (albumCoverFile) {
-        formData.append('coverImage', albumCoverFile);
-      } else {
-        formData.append('coverImage', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
-      }
+      formData.append('coverImage', albumCoverFile);
       const res = await fetch('/api/gallery/albums', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -110,17 +110,17 @@ export const ManageGallery: React.FC = () => {
   const handleUploadPhoto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeAlbum) return;
+    if (!photoFile) {
+      alert('আপলোড করার জন্য একটি ছবি নির্বাচন করুন।');
+      return;
+    }
     setSubmitting(true);
 
     try {
       const formData = new FormData();
       formData.append('caption', caption);
 
-      if (photoFile) {
-        formData.append('image', photoFile);
-      } else {
-        formData.append('image', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
-      }
+      formData.append('image', photoFile);
 
       const res = await fetch(`/api/gallery/albums/${activeAlbum.id}/photos`, {
         method: 'POST',

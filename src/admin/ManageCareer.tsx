@@ -13,7 +13,7 @@ export const ManageCareer: React.FC = () => {
 
   const [title, setTitle] = useState('');
   const [vacancy, setVacancy] = useState(2);
-  const [location, setLocation] = useState('কুড়িগ্রাম ও রংপুর জেলা');
+  const [location, setLocation] = useState('');
   const [deadline, setDeadline] = useState('2026-12-31');
   const [description, setDescription] = useState('');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -28,6 +28,10 @@ export const ManageCareer: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!pdfFile) {
+      alert('সার্কুলারের PDF ফাইল নির্বাচন করুন।');
+      return;
+    }
     setSubmitting(true);
 
     try {
@@ -37,11 +41,7 @@ export const ManageCareer: React.FC = () => {
       formData.append('location', location);
       formData.append('deadline', deadline);
       formData.append('description', description);
-      if (pdfFile) {
-        formData.append('pdfFile', pdfFile);
-      } else {
-        formData.append('pdfFile', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
-      }
+      formData.append('pdfFile', pdfFile);
 
       const res = await fetch('/api/career', {
         method: 'POST',

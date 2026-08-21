@@ -31,22 +31,10 @@ export const About: React.FC = () => {
             {pick(about?.bannerBadge, lang, lang === 'en' ? 'Our Identity & Heritage' : 'আমাদের পরিচয় ও ইতিহাস')}
           </span>
           <h1 className="text-3xl sm:text-5xl font-serif font-bold text-[color:var(--site-cream)]">
-            {pick(
-              about?.bannerTitle,
-              lang,
-              lang === 'en'
-                ? 'Village Development Organization Bogura (GUSB)'
-                : 'গ্রাম উন্নয়ন সংস্থা বগুড়া (Village Development Organization Bogura)'
-            )}
+            {pick(about?.bannerTitle, lang, '')}
           </h1>
           <p className="text-[color:var(--site-cream)]/80 text-sm sm:text-base max-w-2xl mx-auto font-sans">
-            {pick(
-              about?.bannerSub,
-              lang,
-              lang === 'en'
-                ? 'Working continuously since 2010 to build self-reliance for disadvantaged communities in Bogura and North Bengal.'
-                : '২০১০ সাল থেকে বগুড়া ও উত্তরবঙ্গের প্রত্যন্ত অঞ্চলে দরিদ্র ও সুবিধাবঞ্চিত মানুষের স্বাবলম্বিতার লক্ষ্যে কর্মরত।'
-            )}
+            {pick(about?.bannerSub, lang, '')}
           </p>
         </div>
       </div>
@@ -59,22 +47,10 @@ export const About: React.FC = () => {
               {pick(about?.historyTitle, lang, lang === 'en' ? 'Organization History & Genesis' : 'সংস্থার ইতিহাস ও সূচনা')}
             </h2>
             <p className="text-sm text-[color:var(--site-primary)]/75 leading-relaxed font-sans">
-              {pick(
-                about?.history1,
-                lang,
-                lang === 'en'
-                  ? 'Village Development Organization Bogura (GUSB) was established in 2010 in response to the severe poverty and climate vulnerabilities faced by communities living along riverbank char areas in Kurigram, Gaibandha, Rangpur, and Bogura. Founded by visionary social workers and educators, GUSB operates as a non-political, non-profit development agency.'
-                  : 'উত্তরবঙ্গের অবহেলিত ও নদীভাঙন কবলিত কুড়িগ্রাম, গাইবান্ধা ও রংপুর অঞ্চলের নদীবেষ্টিত চরে বসবাসরত মানুষের অভাবনীয় কষ্ট ও দারিদ্র্যের চিত্র থেকেই ২০১ সালে গ্রাম উন্নয়ন সংস্থা বগুড়ার (GUSB) জন্ম।'
-              )}
+              {pick(about?.history1, lang, '')}
             </p>
             <p className="text-sm text-[color:var(--site-primary)]/75 leading-relaxed font-sans">
-              {pick(
-                about?.history2,
-                lang,
-                lang === 'en'
-                  ? 'Over the past 15 years, GUSB has evolved into one of the most trusted development organizations in North Bengal, empowering over 450,000 individuals through microfinance, healthcare, education, and climate-resilient agriculture.'
-                  : 'বিগত ১৫ বছরে সংস্থাটি একটি ছোট সামাজিক উদ্যোগ থেকে উত্তরবঙ্গের অন্যতম নির্ভরযোগ্য উন্নয়ন সংস্থায় পরিণত হয়েছে।'
-              )}
+              {pick(about?.history2, lang, '')}
             </p>
           </div>
 
@@ -85,13 +61,7 @@ export const About: React.FC = () => {
                 {lang === 'en' ? 'Our Vision' : 'ভিশন (Vision)'}
               </div>
               <p className="text-xs sm:text-sm text-[color:var(--site-cream)]/90 leading-relaxed font-sans">
-                {pick(
-                  about?.vision,
-                  lang,
-                  lang === 'en'
-                    ? 'To build an exploitation-free, self-reliant, and equitable rural society where every woman and child enjoys dignity and fundamental human rights.'
-                    : 'একটি শোষনমুক্ত, আত্মনির্ভরশীল ও ন্যায়ভিত্তিক গ্রামীণ সমাজ গঠন, যেখানে প্রত্যেক নারী ও শিশু সম্মানজনক জীবন ও মৌলিক অধিকার ভোগ করবে।'
-                )}
+                {pick(about?.vision, lang, '')}
               </p>
             </div>
 
@@ -101,13 +71,7 @@ export const About: React.FC = () => {
                 {lang === 'en' ? 'Our Mission' : 'মিশন (Mission)'}
               </div>
               <p className="text-xs sm:text-sm text-[color:var(--site-primary)]/75 leading-relaxed font-sans">
-                {pick(
-                  about?.mission,
-                  lang,
-                  lang === 'en'
-                    ? 'Organizing underprivileged communities, enhancing vocational skills, providing accessible microfinance, and expanding sanitation and educational facilities.'
-                    : 'সুবিধাবঞ্চিত জনগোষ্ঠীকে সুসংগঠিত করা, তাদের পেশাগত দক্ষতা বৃদ্ধি, সহজ শর্তে ক্ষুদ্রঋণ প্রদান এবং শিক্ষা ও স্যানিটেশন সুবিধার উন্নয়ন ঘটানো।'
-                )}
+                {pick(about?.mission, lang, '')}
               </p>
             </div>
           </div>
@@ -169,20 +133,10 @@ export const About: React.FC = () => {
                 {pick(about?.legalBadge, lang, lang === 'en' ? 'Legal Status & Accreditation' : 'আইনগত স্বীকৃতি ও অনুমোদন')}
               </span>
               <h3 className="text-2xl font-serif font-bold text-[color:var(--site-cream)]">
-                {pick(
-                  about?.legalTitle,
-                  lang,
-                  lang === 'en' ? 'Registered under Government of Bangladesh' : 'গণপ্রজাতন্ত্রী বাংলাদেশ সরকার কর্তৃক নিবন্ধিত'
-                )}
+                {pick(about?.legalTitle, lang, '')}
               </h3>
               <p className="text-xs sm:text-sm text-[color:var(--site-cream)]/80 font-sans">
-                {pick(
-                  about?.legalSub,
-                  lang,
-                  lang === 'en'
-                    ? 'All operations comply strictly with government guidelines and Microcredit Regulatory Authority (MRA) standards.'
-                    : 'আমাদের সকল কার্যক্রম সরকারি বিধিমালা ও মাইক্রোক্রেডিট রেগুলেটরি অথরিটির (MRA) নিয়মাবলী অনুসরণ করে পরিচালিত।'
-                )}
+                {pick(about?.legalSub, lang, '')}
               </p>
             </div>
 

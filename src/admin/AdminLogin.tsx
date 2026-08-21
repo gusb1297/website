@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Mail, ShieldAlert, ArrowRight, KeyRound } from 'lucide-react';
+import { Lock, Mail, ShieldAlert, ArrowRight, Eye, EyeOff } from 'lucide-react';
 
 export const AdminLogin: React.FC = () => {
-  const [email, setEmail] = useState('admin@vdobogura.org');
-  const [password, setPassword] = useState('admin123password');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -35,11 +36,6 @@ export const AdminLogin: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemo = () => {
-    setEmail('admin@vdobogura.org');
-    setPassword('admin123password');
   };
 
   return (
@@ -73,6 +69,8 @@ export const AdminLogin: React.FC = () => {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                autoComplete="username"
+                placeholder="you@example.org"
                 className="w-full pl-10 pr-4 py-3 rounded-xl text-xs bg-slate-900 border border-emerald-800 text-white focus:outline-none focus:border-amber-400"
               />
             </div>
@@ -83,12 +81,21 @@ export const AdminLogin: React.FC = () => {
             <div className="relative">
               <Lock className="w-4 h-4 text-emerald-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-xl text-xs bg-slate-900 border border-emerald-800 text-white focus:outline-none focus:border-amber-400"
+                autoComplete="current-password"
+                className="w-full pl-10 pr-10 py-3 rounded-xl text-xs bg-slate-900 border border-emerald-800 text-white focus:outline-none focus:border-amber-400"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400 hover:text-amber-400"
+                aria-label={showPassword ? 'পাসওয়ার্ড লুকান' : 'পাসওয়ার্ড দেখুন'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 
@@ -101,17 +108,6 @@ export const AdminLogin: React.FC = () => {
           </button>
         </form>
 
-        {/* Demo Credentials Quick Button */}
-        <div className="pt-4 border-t border-emerald-900/80 text-center space-y-2">
-          <p className="text-[11px] text-emerald-300">দ্রুত টেস্ট লগইনের জন্য ডেমো তথ্য ব্যবহার করুন:</p>
-          <button
-            onClick={fillDemo}
-            type="button"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-amber-300 text-xs font-mono border border-emerald-700"
-          >
-            <KeyRound className="w-3.5 h-3.5" /> admin@vdobogura.org / admin123password
-          </button>
-        </div>
       </div>
     </div>
   );

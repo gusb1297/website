@@ -6,6 +6,9 @@ import { processVideoFile, probeVideoDuration } from '../config/ffmpeg';
 import { uploadToCloudinary, storeFile, destroyCloudinaryAsset } from '../config/cloudinary';
 import { parseVideoLink, formatDuration } from '../utils/videoSources';
 import { persistStore } from '../config/persistence';
+import { getJwtSecret } from '../config/env';
+import { AdminServiceError, verifyCredentials } from '../services/adminService';
+import { AuthRequest } from '../middleware/auth';
 import { memoryStore, DEFAULT_THEME } from '../models/schemas';
 import {
   HeroSlide,
@@ -25,7 +28,24 @@ import {
   PageContent,
 } from '../../src/types';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'vdo_bogura_secret_key_2026';
+/** 400 response helper for missing required fields. */
+const requireFields = (
+  res: Response,
+  fields: Record<string, unknown>
+): boolean => {
+  const missing = Object.entries(fields)
+    .filter(([, value]) => value === undefined || value === null || String(value).trim() === '')
+    .map(([key]) => key);
+  if (missing.length) {
+    res.status(400).json({
+      error: 'missing_fields',
+      fields: missing,
+      message: `আবশ্যক তথ্য দেওয়া হয়নি: ${missing.join(', ')}`,
+    });
+    return false;
+  }
+  return true;
+};
 
 const slugify = (input: string) =>
   input
@@ -50,40 +70,32 @@ export const uploadDirectFile = async (req: Request, res: Response) => {
 
 // 1. AUTH CONTROLLER
 export const login = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+  const { email, password } = req.body || {};
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+    return res.status(400).json({ error: 'missing_fields', message: 'ইমেইল ও পাসওয়ার্ড দুটোই দিতে হবে।' });
   }
 
-  // Production: override the demo accounts with ADMIN_EMAILS / ADMIN_PASSWORDS
-  // (comma separated) via environment variables.
-  const validEmails = (process.env.ADMIN_EMAILS || 'admin@vdobogura.org,admin@gusb.org,admin@palli-ngo.org,admin@gmail.com,admin')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  const validPasswords = (process.env.ADMIN_PASSWORDS || 'admin123password,admin,admin123')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  try {
+    // Credentials are checked against the admins collection in MongoDB.
+    // There are no built-in or demo accounts.
+    const admin = await verifyCredentials(email, password);
+    if (!admin) {
+      return res.status(401).json({ error: 'invalid_credentials', message: 'অবৈধ ইমেইল অথবা পাসওয়ার্ড' });
+    }
 
-  const isAdmin = validEmails.includes(email.toLowerCase()) && validPasswords.includes(password);
-
-  if (isAdmin) {
-    const token = jwt.sign(
-      { id: 'admin-1', email, role: 'admin', name: 'NGO System Administrator' },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-    return res.json({
-      token,
-      user: { id: 'admin-1', email, role: 'admin', name: 'NGO System Administrator' },
-    });
+    const payload = { id: admin.id, name: admin.name, email: admin.email, role: admin.role };
+    const token = jwt.sign(payload, getJwtSecret(), { expiresIn: '7d' });
+    return res.json({ token, user: payload });
+  } catch (err) {
+    if (err instanceof AdminServiceError) {
+      return res.status(err.status).json({ error: err.code, message: err.message });
+    }
+    console.error('[auth] Login error:', err);
+    return res.status(500).json({ error: 'server_error', message: 'সার্ভারে সমস্যা হয়েছে।' });
   }
-
-  return res.status(401).json({ error: 'invalid_credentials', message: 'অবৈধ ইমেইল অথবা পাসওয়ার্ড' });
 };
 
-export const getMe = async (req: any, res: Response) => {
+export const getMe = async (req: AuthRequest, res: Response) => {
   if (req.user) {
     return res.json({ user: req.user });
   }
@@ -104,11 +116,13 @@ export const createHeroSlide = async (req: Request, res: Response) => {
   if (req.file) {
     imagePath = await uploadToCloudinary(req.file.path, 'vdo_bogura/hero');
   }
+  if (!requireFields(res, { image: imagePath, headline: req.body.headline, subtext: req.body.subtext })) return;
+
   const newSlide: HeroSlide = {
     id: 'hs-' + Date.now(),
-    image: imagePath || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=1200&q=80',
-    headline: req.body.headline || 'নতুন শিরোনাম',
-    subtext: req.body.subtext || 'সাবটেক্সট বিবরণ',
+    image: imagePath,
+    headline: req.body.headline,
+    subtext: req.body.subtext,
     buttonText: req.body.buttonText,
     buttonLink: req.body.buttonLink,
     order: memoryStore.heroSlides.length + 1,
@@ -177,6 +191,8 @@ export const createProgram = async (req: Request, res: Response) => {
   if (req.file) {
     coverImage = await uploadToCloudinary(req.file.path, 'vdo_bogura/programs');
   }
+  if (!requireFields(res, { title: req.body.title, shortDesc: req.body.shortDesc, content: req.body.content, coverImage })) return;
+
   const slug = slugify(req.body.slug || req.body.title || '') || 'program-' + Date.now();
   const newProgram: Program = {
     id: 'prg-' + Date.now(),
@@ -185,7 +201,7 @@ export const createProgram = async (req: Request, res: Response) => {
     icon: req.body.icon || 'Sprout',
     shortDesc: req.body.shortDesc,
     content: req.body.content,
-    coverImage: coverImage || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80',
+    coverImage,
     status: req.body.status || 'ongoing',
     order: memoryStore.programs.length + 1,
     beneficiariesCount: Number(req.body.beneficiariesCount || 0),
@@ -252,17 +268,19 @@ export const createNews = async (req: Request, res: Response) => {
   if (req.file) {
     thumbnail = await uploadToCloudinary(req.file.path, 'vdo_bogura/news');
   }
+  if (!requireFields(res, { title: req.body.title, content: req.body.content, thumbnail })) return;
+
   const slug = slugify(req.body.slug || req.body.title || '') || 'news-' + Date.now();
   const newNews: NewsItem = {
     id: 'news-' + Date.now(),
     title: req.body.title,
     slug,
     category: req.body.category || 'News',
-    thumbnail: thumbnail || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80',
+    thumbnail,
     content: req.body.content,
     publishedAt: req.body.publishedAt || new Date().toISOString(),
     views: 0,
-    author: req.body.author || 'সিস্টেম অ্যাডমিন',
+    author: req.body.author || '',
   };
   memoryStore.news.unshift(newNews);
   persistStore();
@@ -316,8 +334,8 @@ const pickFile = (req: Request, names: string[]): Express.Multer.File | undefine
   return (req.file && names.includes(req.file.fieldname) ? req.file : undefined) || undefined;
 };
 
-const DEFAULT_VIDEO_THUMB =
-  'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80';
+/** No stock imagery: when no poster can be derived the player renders its own placeholder. */
+const DEFAULT_VIDEO_THUMB = '';
 
 /**
  * Build a video record from an uploaded device file.
@@ -611,14 +629,16 @@ export const createNotice = async (req: Request, res: Response) => {
   if (req.file) {
     pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/notices');
   }
+  if (!requireFields(res, { title: req.body.title, pdfFile })) return;
+
   const newNotice: Notice = {
     id: 'not-' + Date.now(),
     title: req.body.title,
-    pdfFile: pdfFile || '/uploads/pdfs/sample_notice.pdf',
+    pdfFile,
     publishedAt: req.body.publishedAt || new Date().toISOString(),
     expiryDate: req.body.expiryDate || undefined,
     isActive: req.body.isActive !== 'false',
-    referenceNo: req.body.referenceNo || `VDO/NOT/${Date.now().toString().slice(-4)}`,
+    referenceNo: req.body.referenceNo || '',
   };
   memoryStore.notices.unshift(newNotice);
   persistStore();
@@ -679,13 +699,15 @@ export const createPublication = async (req: Request, res: Response) => {
     pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/publications');
   }
 
+  if (!requireFields(res, { title: req.body.title, pdfFile })) return;
+
   const newPub: Publication = {
     id: 'pub-' + Date.now(),
     title: req.body.title,
     type: req.body.type || 'annual_report',
-    pdfFile: pdfFile || '/uploads/pdfs/sample_pub.pdf',
+    pdfFile,
     year: Number(req.body.year || new Date().getFullYear()),
-    thumbnail: thumbnail || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=400&q=80',
+    thumbnail: thumbnail || '',
   };
   memoryStore.publications.unshift(newPub);
   persistStore();
@@ -728,10 +750,12 @@ export const createAlbum = async (req: Request, res: Response) => {
   if (req.file) {
     coverImage = await uploadToCloudinary(req.file.path, 'vdo_bogura/gallery');
   }
+  if (!requireFields(res, { title: req.body.title, coverImage })) return;
+
   const newAlbum: GalleryAlbum = {
     id: 'alb-' + Date.now(),
     title: req.body.title,
-    coverImage: coverImage || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80',
+    coverImage,
     description: req.body.description,
     createdAt: new Date().toISOString(),
   };
@@ -781,10 +805,12 @@ export const addPhoto = async (req: Request, res: Response) => {
   if (req.file) {
     image = await uploadToCloudinary(req.file.path, 'vdo_bogura/gallery');
   }
+  if (!requireFields(res, { albumId: req.body.albumId, image })) return;
+
   const newPhoto: GalleryPhoto = {
     id: 'p-' + Date.now(),
     albumId: req.body.albumId,
-    image: image || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80',
+    image,
     caption: req.body.caption || '',
     uploadedAt: new Date().toISOString(),
   };
@@ -830,12 +856,14 @@ export const createCommitteeMember = async (req: Request, res: Response) => {
   if (req.file) {
     photo = await uploadToCloudinary(req.file.path, 'vdo_bogura/committee');
   }
+  if (!requireFields(res, { name: req.body.name, designation: req.body.designation, photo })) return;
+
   const newMember: CommitteeMember = {
     id: 'com-' + Date.now(),
     name: req.body.name,
     designation: req.body.designation,
     type: req.body.type || 'executive',
-    photo: photo || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
+    photo,
     bio: req.body.bio || '',
     order: memoryStore.committee.length + 1,
     email: req.body.email,
@@ -881,11 +909,13 @@ export const createPartner = async (req: Request, res: Response) => {
   if (req.file) {
     logo = await uploadToCloudinary(req.file.path, 'vdo_bogura/partners');
   }
+  if (!requireFields(res, { name: req.body.name, logo })) return;
+
   const newPartner: Partner = {
     id: 'part-' + Date.now(),
     name: req.body.name,
-    logo: logo || 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?auto=format&fit=crop&w=200&q=80',
-    websiteUrl: req.body.websiteUrl || '#',
+    logo,
+    websiteUrl: req.body.websiteUrl || '',
   };
   memoryStore.partners.push(newPartner);
   persistStore();
@@ -936,12 +966,19 @@ export const createCareer = async (req: Request, res: Response) => {
   if (req.file) {
     pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/careers');
   }
+  if (!requireFields(res, {
+    title: req.body.title,
+    deadline: req.body.deadline,
+    description: req.body.description,
+    location: req.body.location,
+  })) return;
+
   const newCircular: CareerCircular = {
     id: 'car-' + Date.now(),
     title: req.body.title,
     deadline: req.body.deadline,
     description: req.body.description,
-    location: req.body.location || 'প্রধান কার্যালয় ও ফিল্ড শাখা',
+    location: req.body.location,
     vacancy: Number(req.body.vacancy || 1),
     pdfFile,
     isActive: true,

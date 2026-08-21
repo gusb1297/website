@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, ArrowRight, Pause, Play, ChevronDown } from 
 import { HeroSlide } from '../types';
 import { Link } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
+import { useSettings } from '../context/SettingsContext';
 
 interface HeroSliderProps {
   slides: HeroSlide[];
@@ -10,6 +11,7 @@ interface HeroSliderProps {
 
 export const HeroSlider: React.FC<HeroSliderProps> = ({ slides }) => {
   const { lang } = useLanguage();
+  const { settings } = useSettings();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -33,8 +35,15 @@ export const HeroSlider: React.FC<HeroSliderProps> = ({ slides }) => {
 
   if (activeSlides.length === 0) {
     return (
-      <div className="w-full h-screen bg-emerald-950 flex items-center justify-center text-white font-serif">
-        <p>স্লাইড পাওয়া যায়নি</p>
+      <div className="w-full h-[60vh] bg-[color:var(--site-primary)] flex flex-col items-center justify-center gap-3 text-center px-6 text-white font-serif">
+        <p className="text-2xl font-bold">
+          {settings?.ngoName || settings?.ngoNameEn || (lang === 'en' ? 'Welcome' : 'স্বাগতম')}
+        </p>
+        <p className="text-xs text-white/70 font-sans max-w-md">
+          {lang === 'en'
+            ? 'No hero slides have been published yet. Add them from the admin panel.'
+            : 'এখনো কোনো হিরো স্লাইড প্রকাশ করা হয়নি। অ্যাডমিন প্যানেল থেকে স্লাইড যোগ করুন।'}
+        </p>
       </div>
     );
   }
@@ -119,9 +128,7 @@ export const HeroSlider: React.FC<HeroSliderProps> = ({ slides }) => {
         <div className="max-w-3xl space-y-5 lg:space-y-6 animate-fadeIn">
           {/* Top Tag */}
           <span className="block max-w-full text-[color:var(--site-accent)] text-xs font-bold uppercase tracking-[0.16em] sm:tracking-[0.22em] lg:tracking-[0.3em] leading-relaxed break-words">
-            {lang === 'en'
-              ? 'Village Development Organization Bogura (GUSB) - Social Advancement'
-              : 'গ্রাম উন্নয়ন সংস্থা বগুড়া (GUSB) - সামাজিক অগ্রযাত্রা'}
+            {settings?.ngoTagline || (lang === 'en' ? settings?.ngoNameEn || '' : settings?.ngoName || '')}
           </span>
 
           {/* Main Headline */}

@@ -19,16 +19,16 @@ export const ManagePartners: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!logoFile) {
+      alert('পার্টনারের লোগো নির্বাচন করুন।');
+      return;
+    }
     setCreating(true);
     try {
       const formData = new FormData();
       formData.append('name', name);
       formData.append('websiteUrl', websiteUrl);
-      if (logoFile) {
-        formData.append('logo', logoFile);
-      } else {
-        formData.append('logo', 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?auto=format&fit=crop&w=200&q=80');
-      }
+      formData.append('logo', logoFile);
       const res = await fetch('/api/partners', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },

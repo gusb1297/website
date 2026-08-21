@@ -7,6 +7,8 @@ import fs from 'fs';
 import mongoose from 'mongoose';
 import apiRouter from './server/routes/api';
 import { loadStore, flushStore } from './server/config/persistence';
+import { bootstrapAdminFromEnv } from './server/services/adminService';
+import { getJwtSecret } from './server/config/env';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -65,18 +67,26 @@ async function startServer() {
   if (loaded) {
     console.log('Loaded persisted content from data/store.json');
   } else {
-    console.log('No persisted store found - using seed content.');
+    console.log('No persisted store found - starting with empty content (add it from the admin panel).');
   }
 
-  // Connect MongoDB if MONGODB_URI is provided (used for future persistence
-  // layers; content management currently runs on the JSON store).
+  // Fail fast when the JWT signing key is missing in production.
+  getJwtSecret();
+
+  // Admin accounts live in MongoDB. Without a connection nobody can sign in to
+  // the admin panel (there are no fallback / demo credentials by design).
   if (process.env.MONGODB_URI) {
     try {
       await mongoose.connect(process.env.MONGODB_URI);
       console.log('Successfully connected to MongoDB database!');
+      await bootstrapAdminFromEnv();
     } catch (err) {
-      console.warn('MongoDB connection error (continuing without it):', err);
+      console.error('MongoDB connection error - admin login is disabled until it is reachable:', err);
     }
+  } else {
+    console.warn(
+      'MONGODB_URI is not set. Admin accounts are stored in MongoDB, so the admin panel cannot be used until it is configured.'
+    );
   }
 
   // Healthcheck endpoint (before the API router)
