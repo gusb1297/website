@@ -24,6 +24,8 @@ import {
   updateNews,
   deleteNews,
   getVideos,
+  createVideo,
+  updateVideo,
   uploadVideo,
   embedVideo,
   streamVideo,
@@ -97,9 +99,20 @@ router.post('/news', authenticateJwt, upload.single('thumbnail'), createNews);
 router.put('/news/:id', authenticateJwt, upload.single('thumbnail'), updateNews);
 router.delete('/news/:id', authenticateJwt, deleteNews);
 
-// Videos
+// Videos — two-way upload:
+//   * multipart with `videoFile` → device upload (Cloudinary when configured)
+//   * body/field `embedUrl` (or `youtubeUrl`) → YouTube / Vimeo link
+const videoUploadFields = upload.fields([
+  { name: 'videoFile', maxCount: 1 },
+  { name: 'video', maxCount: 1 },
+  { name: 'thumbnail', maxCount: 1 },
+]);
+
 router.get('/videos', getVideos);
-router.post('/videos/upload', authenticateJwt, upload.single('video'), uploadVideo);
+router.post('/videos', authenticateJwt, videoUploadFields, createVideo);
+router.put('/videos/:id', authenticateJwt, upload.single('thumbnail'), updateVideo);
+// Legacy endpoints (kept so older admin builds keep working)
+router.post('/videos/upload', authenticateJwt, videoUploadFields, uploadVideo);
 router.post('/videos/embed', authenticateJwt, embedVideo);
 router.get('/videos/stream/:id', streamVideo);
 router.delete('/videos/:id', authenticateJwt, deleteVideo);

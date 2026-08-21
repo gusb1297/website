@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import path from 'path';
 import fs from 'fs';
-import { processVideoFile } from '../config/ffmpeg';
-import { uploadToCloudinary } from '../config/cloudinary';
+import { processVideoFile, probeVideoDuration } from '../config/ffmpeg';
+import { uploadToCloudinary, storeFile, destroyCloudinaryAsset } from '../config/cloudinary';
+import { parseVideoLink, formatDuration } from '../utils/videoSources';
 import { persistStore } from '../config/persistence';
 import { memoryStore, DEFAULT_THEME } from '../models/schemas';
 import {
@@ -301,55 +302,223 @@ export const getVideos = (req: Request, res: Response) => {
   res.json(list);
 };
 
-export const uploadVideo = async (req: Request, res: Response) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'Please upload a video file' });
+type MulterFiles = Record<string, Express.Multer.File[]> | undefined;
+
+/** Pull the first matching file out of an `upload.fields()` request. */
+const pickFile = (req: Request, names: string[]): Express.Multer.File | undefined => {
+  const files = req.files as MulterFiles;
+  if (files) {
+    for (const name of names) {
+      const match = files[name]?.[0];
+      if (match) return match;
+    }
+  }
+  return (req.file && names.includes(req.file.fieldname) ? req.file : undefined) || undefined;
+};
+
+const DEFAULT_VIDEO_THUMB =
+  'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80';
+
+/**
+ * Build a video record from an uploaded device file.
+ * Cloudinary is used whenever it is configured (chunked upload for big files,
+ * auto poster frame); otherwise the file is kept on local disk and streamed
+ * through /api/videos/stream/:id.
+ */
+async function buildUploadedVideo(
+  file: Express.Multer.File,
+  body: Record<string, string | undefined>,
+  thumbnailFile?: Express.Multer.File
+): Promise<VideoItem> {
+  // Read the real duration while the file is still on local disk.
+  let durationSeconds = await probeVideoDuration(file.path);
+
+  const stored = await storeFile(file.path, {
+    folder: 'vdo_bogura/videos',
+    resourceType: 'video',
+  });
+
+  let thumbnail: string;
+  if (stored.storage === 'cloudinary') {
+    // Cloudinary derives the poster frame itself — no ffmpeg needed.
+    durationSeconds = stored.duration ?? durationSeconds;
+    thumbnail = stored.thumbnailUrl || DEFAULT_VIDEO_THUMB;
+  } else {
+    // Local disk: generate a poster frame with ffmpeg (falls back to a
+    // placeholder when ffmpeg is not installed on the host).
+    const processed = await processVideoFile(file.path);
+    thumbnail = processed.thumbnailPath;
+    durationSeconds = durationSeconds ?? processed.durationSeconds;
   }
 
-  const { thumbnailPath, duration } = await processVideoFile(req.file.path);
-  const filePath = await uploadToCloudinary(req.file.path, 'vdo_bogura/videos');
+  // Admin supplied a custom poster image → store it too and prefer it.
+  if (thumbnailFile) {
+    const storedThumb = await storeFile(thumbnailFile.path, { folder: 'vdo_bogura/thumbnails' });
+    thumbnail = storedThumb.url;
+  }
 
-  const newVid: VideoItem = {
+  return {
     id: 'vid-' + Date.now(),
-    title: req.body.title || req.file.originalname,
+    title: body.title?.trim() || file.originalname,
     type: 'upload',
-    filePath,
-    thumbnail: thumbnailPath,
-    duration,
+    filePath: stored.url,
+    publicId: stored.publicId,
+    storage: stored.storage,
+    thumbnail,
+    duration: formatDuration(durationSeconds) || '00:00',
+    durationSeconds,
+    sizeBytes: stored.bytes ?? file.size,
     uploadedAt: new Date().toISOString(),
-    category: req.body.category || 'General',
+    category: body.category?.trim() || 'General',
+    description: body.description?.trim() || undefined,
   };
+}
 
+/** Build a video record from a pasted YouTube / Vimeo / direct link. */
+function buildEmbeddedVideo(body: Record<string, string | undefined>, thumbnailUrl?: string): VideoItem | null {
+  const rawUrl = (body.embedUrl || body.youtubeUrl || body.url || '').trim();
+  const parsed = parseVideoLink(rawUrl);
+  if (!parsed) return null;
+
+  return {
+    id: 'vid-' + Date.now(),
+    title: body.title?.trim() || 'ভিডিও',
+    type: 'embed',
+    provider: parsed.provider,
+    providerId: parsed.videoId,
+    embedUrl: parsed.embedUrl,
+    watchUrl: parsed.watchUrl,
+    thumbnail: thumbnailUrl || body.thumbnail?.trim() || parsed.thumbnail || DEFAULT_VIDEO_THUMB,
+    duration: body.duration?.trim() || undefined,
+    uploadedAt: new Date().toISOString(),
+    category: body.category?.trim() || 'Highlight',
+    description: body.description?.trim() || undefined,
+  };
+}
+
+/**
+ * Unified two-way video endpoint (POST /api/videos).
+ *
+ * 1. **Device upload** – send `videoFile` (or `video`) as multipart/form-data;
+ *    the file goes to Cloudinary when configured, local disk otherwise.
+ * 2. **YouTube / Vimeo link** – send `embedUrl` (or `youtubeUrl`); any YouTube
+ *    URL shape is normalised to a real embed URL with an auto thumbnail.
+ *
+ * The mode can be forced with `type=upload|embed`, otherwise it is detected
+ * from what was actually sent.
+ */
+export const createVideo = async (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, string | undefined>;
+  const videoFile = pickFile(req, ['videoFile', 'video', 'file']);
+  const thumbnailFile = pickFile(req, ['thumbnail', 'thumbnailFile', 'poster']);
+  const linkValue = (body.embedUrl || body.youtubeUrl || body.url || '').trim();
+  const requestedType = body.type === 'upload' || body.type === 'embed' ? body.type : undefined;
+  const mode = requestedType || (videoFile ? 'upload' : linkValue ? 'embed' : undefined);
+
+  try {
+    if (mode === 'upload') {
+      if (!videoFile) {
+        return res.status(400).json({ error: 'অনুগ্রহ করে একটি ভিডিও ফাইল নির্বাচন করুন (videoFile)' });
+      }
+      const newVid = await buildUploadedVideo(videoFile, body, thumbnailFile);
+      memoryStore.videos.unshift(newVid);
+      persistStore();
+      return res.status(201).json(newVid);
+    }
+
+    if (mode === 'embed') {
+      let customThumb: string | undefined;
+      if (thumbnailFile) {
+        const storedThumb = await storeFile(thumbnailFile.path, { folder: 'vdo_bogura/thumbnails' });
+        customThumb = storedThumb.url;
+      }
+      const newVid = buildEmbeddedVideo(body, customThumb);
+      if (!newVid) {
+        return res.status(400).json({ error: 'সঠিক ইউটিউব/ভিমিও লিঙ্ক দিন (Invalid video link)' });
+      }
+      if (!body.title?.trim()) {
+        return res.status(400).json({ error: 'ভিডিও শিরোনাম আবশ্যক (Title is required)' });
+      }
+      memoryStore.videos.unshift(newVid);
+      persistStore();
+      return res.status(201).json(newVid);
+    }
+
+    return res.status(400).json({
+      error: 'ভিডিও ফাইল অথবা ইউটিউব লিঙ্ক দিন (send either a videoFile or an embedUrl)',
+    });
+  } catch (err) {
+    console.error('Video create error:', err);
+    return res.status(500).json({ error: 'ভিডিও সংরক্ষণ করা যায়নি (Failed to save video)' });
+  }
+};
+
+/** Legacy endpoint kept for older admin builds: POST /api/videos/upload. */
+export const uploadVideo = async (req: Request, res: Response) => {
+  const file = pickFile(req, ['video', 'videoFile', 'file']);
+  if (!file) {
+    return res.status(400).json({ error: 'Please upload a video file' });
+  }
+  try {
+    const newVid = await buildUploadedVideo(file, (req.body || {}) as Record<string, string>, pickFile(req, ['thumbnail']));
+    memoryStore.videos.unshift(newVid);
+    persistStore();
+    return res.status(201).json(newVid);
+  } catch (err) {
+    console.error('Video upload error:', err);
+    return res.status(500).json({ error: 'Failed to upload video' });
+  }
+};
+
+/** Legacy endpoint kept for older admin builds: POST /api/videos/embed. */
+export const embedVideo = (req: Request, res: Response) => {
+  const body = (req.body || {}) as Record<string, string | undefined>;
+  if (!body.title || !(body.embedUrl || body.youtubeUrl || body.url)) {
+    return res.status(400).json({ error: 'Title and Embed URL are required' });
+  }
+  const newVid = buildEmbeddedVideo(body);
+  if (!newVid) {
+    return res.status(400).json({ error: 'Invalid video link' });
+  }
   memoryStore.videos.unshift(newVid);
   persistStore();
   res.status(201).json(newVid);
 };
 
-export const embedVideo = (req: Request, res: Response) => {
-  const { title, embedUrl, thumbnail, category } = req.body;
-  if (!title || !embedUrl) {
-    return res.status(400).json({ error: 'Title and Embed URL are required' });
+/** Update the editable metadata of a video (title / category / link / poster). */
+export const updateVideo = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const existing = memoryStore.videos.find((v) => v.id === id);
+  if (!existing) {
+    return res.status(404).json({ error: 'Video not found' });
   }
 
-  let finalEmbed = embedUrl;
-  if (embedUrl.includes('watch?v=')) {
-    finalEmbed = embedUrl.replace('watch?v=', 'embed/');
+  const body = (req.body || {}) as Record<string, string | undefined>;
+  if (body.title?.trim()) existing.title = body.title.trim();
+  if (body.category?.trim()) existing.category = body.category.trim();
+  if (body.description !== undefined) existing.description = body.description.trim() || undefined;
+
+  const link = (body.embedUrl || body.youtubeUrl || body.url || '').trim();
+  if (existing.type === 'embed' && link) {
+    const parsed = parseVideoLink(link);
+    if (!parsed) return res.status(400).json({ error: 'Invalid video link' });
+    existing.embedUrl = parsed.embedUrl;
+    existing.watchUrl = parsed.watchUrl;
+    existing.provider = parsed.provider;
+    existing.providerId = parsed.videoId;
+    if (parsed.thumbnail && !body.thumbnail) existing.thumbnail = parsed.thumbnail;
   }
 
-  const newVid: VideoItem = {
-    id: 'vid-' + Date.now(),
-    title,
-    type: 'embed',
-    embedUrl: finalEmbed,
-    thumbnail: thumbnail || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80',
-    duration: '05:00',
-    uploadedAt: new Date().toISOString(),
-    category: category || 'Highlight',
-  };
+  const thumbnailFile = pickFile(req, ['thumbnail', 'thumbnailFile', 'poster']);
+  if (thumbnailFile) {
+    const storedThumb = await storeFile(thumbnailFile.path, { folder: 'vdo_bogura/thumbnails' });
+    existing.thumbnail = storedThumb.url;
+  } else if (body.thumbnail?.trim()) {
+    existing.thumbnail = body.thumbnail.trim();
+  }
 
-  memoryStore.videos.unshift(newVid);
   persistStore();
-  res.status(201).json(newVid);
+  res.json(existing);
 };
 
 export const streamVideo = (req: Request, res: Response) => {
@@ -359,7 +528,13 @@ export const streamVideo = (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Uploaded video not found' });
   }
 
-  const absolutePath = path.join(process.cwd(), video.filePath);
+  // Cloudinary (or any remote) asset → hand the browser the CDN URL directly;
+  // Cloudinary already serves HTTP range requests for smooth seeking.
+  if (/^https?:\/\//i.test(video.filePath)) {
+    return res.redirect(302, video.filePath);
+  }
+
+  const absolutePath = path.join(process.cwd(), video.filePath.replace(/^\//, ''));
   if (!fs.existsSync(absolutePath)) {
     return res.status(404).json({ error: 'Video file missing from server disk' });
   }
@@ -394,10 +569,26 @@ export const streamVideo = (req: Request, res: Response) => {
   }
 };
 
-export const deleteVideo = (req: Request, res: Response) => {
+export const deleteVideo = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.videos.find((v) => v.id === id);
   memoryStore.videos = memoryStore.videos.filter((v) => v.id !== id);
   persistStore();
+
+  // Best-effort cleanup of the stored asset so deleted videos stop billing.
+  if (target?.type === 'upload' && target.filePath) {
+    if (target.storage === 'cloudinary' && target.publicId) {
+      await destroyCloudinaryAsset(target.publicId, 'video');
+    } else if (!/^https?:\/\//i.test(target.filePath)) {
+      try {
+        const abs = path.join(process.cwd(), target.filePath.replace(/^\//, ''));
+        if (fs.existsSync(abs)) fs.unlinkSync(abs);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   res.json({ message: 'Video deleted' });
 };
 

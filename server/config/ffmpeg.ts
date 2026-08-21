@@ -1,13 +1,46 @@
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
 import fs from 'fs';
+import { formatDuration } from '../utils/videoSources';
+
+/**
+ * Read the real duration (in seconds) of a video file with ffprobe.
+ * Resolves to `undefined` when ffprobe/ffmpeg is unavailable.
+ */
+export async function probeVideoDuration(videoPath: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value?: number) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
+    try {
+      ffmpeg.ffprobe(videoPath, (err, metadata) => {
+        if (err) return done(undefined);
+        const seconds = metadata?.format?.duration;
+        done(typeof seconds === 'number' && seconds > 0 ? seconds : undefined);
+      });
+    } catch {
+      done(undefined);
+    }
+
+    const timer = setTimeout(() => done(undefined), 8000);
+    (timer as { unref?: () => void }).unref?.();
+  });
+}
 
 /**
  * Generate a thumbnail + duration for an uploaded video. When ffmpeg is not
  * available on the host a placeholder thumbnail is written instead so the
  * video still appears in the gallery.
  */
-export async function processVideoFile(videoPath: string): Promise<{ thumbnailPath: string; duration: string }> {
+export async function processVideoFile(
+  videoPath: string
+): Promise<{ thumbnailPath: string; duration: string; durationSeconds?: number }> {
+  const durationSeconds = await probeVideoDuration(videoPath);
+  const durationLabel = formatDuration(durationSeconds) || '03:00';
   const videoName = path.basename(videoPath, path.extname(videoPath));
   const thumbnailsDir = path.join(process.cwd(), 'uploads', 'thumbnails');
   const thumbnailFilename = `thumb-${videoName}.jpg`;
@@ -15,7 +48,7 @@ export async function processVideoFile(videoPath: string): Promise<{ thumbnailPa
 
   return new Promise((resolve) => {
     let settled = false;
-    const done = (result: { thumbnailPath: string; duration: string }) => {
+    const done = (result: { thumbnailPath: string; duration: string; durationSeconds?: number }) => {
       if (settled) return;
       settled = true;
       resolve(result);
@@ -27,20 +60,12 @@ export async function processVideoFile(videoPath: string): Promise<{ thumbnailPa
 
     ffmpeg(videoPath)
       .on('end', () => {
-        // Try to read the real duration from the file metadata (best effort).
-        let duration = '03:00';
-        try {
-          const meta = fs.statSync(videoPath);
-          void meta;
-        } catch (e) {
-          /* ignore */
-        }
-        done({ thumbnailPath: `/uploads/thumbnails/${thumbnailFilename}`, duration });
+        done({ thumbnailPath: `/uploads/thumbnails/${thumbnailFilename}`, duration: durationLabel, durationSeconds });
       })
       .on('error', (err) => {
         console.warn('FFmpeg thumbnail generation notice (using fallback thumbnail):', err.message);
         createFallbackThumbnail(thumbnailFile);
-        done({ thumbnailPath: `/uploads/thumbnails/${thumbnailFilename}`, duration: '03:00' });
+        done({ thumbnailPath: `/uploads/thumbnails/${thumbnailFilename}`, duration: durationLabel, durationSeconds });
       })
       .screenshots({
         count: 1,
@@ -55,7 +80,7 @@ export async function processVideoFile(videoPath: string): Promise<{ thumbnailPa
       if (!fs.existsSync(thumbnailFile)) {
         createFallbackThumbnail(thumbnailFile);
       }
-      done({ thumbnailPath: `/uploads/thumbnails/${thumbnailFilename}`, duration: '03:00' });
+      done({ thumbnailPath: `/uploads/thumbnails/${thumbnailFilename}`, duration: durationLabel, durationSeconds });
     }, 8000);
     (safetyTimer as { unref?: () => void }).unref?.();
   });

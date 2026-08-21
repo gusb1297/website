@@ -40,16 +40,34 @@ export interface NewsItem {
   author?: string;
 }
 
+export type VideoStorage = 'cloudinary' | 'local';
+export type VideoProviderName = 'youtube' | 'vimeo' | 'external';
+
 export interface VideoItem {
   id: string;
   title: string;
+  /** `upload` = file from a device (Cloudinary / local disk), `embed` = YouTube / Vimeo link. */
   type: 'upload' | 'embed';
+  /** Playable URL of an uploaded file (Cloudinary secure URL or local /uploads path). */
   filePath?: string;
+  /** Cloudinary public id, kept so deleting the video also deletes the asset. */
+  publicId?: string;
+  /** Where an uploaded file physically lives. */
+  storage?: VideoStorage;
+  /** Provider of an embedded video. */
+  provider?: VideoProviderName;
+  /** Provider video id (e.g. the YouTube 11-char id). */
+  providerId?: string;
+  /** Original link the admin pasted / provider watch page. */
+  watchUrl?: string;
   thumbnail: string;
   embedUrl?: string;
   duration?: string;
+  durationSeconds?: number;
+  sizeBytes?: number;
   uploadedAt: string;
   category?: string;
+  description?: string;
 }
 
 export interface Notice {
