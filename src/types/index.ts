@@ -1,3 +1,8 @@
+export interface BilingualText {
+  bn: string;
+  en: string;
+}
+
 export interface HeroSlide {
   id: string;
   image: string;
@@ -151,16 +156,33 @@ export interface BranchOffice {
   email: string;
 }
 
+/** Site-wide theme colors, editable from the admin panel (color picker). */
+export interface ThemeColors {
+  /** Primary dark brand color (default #1B3022 - deep green) */
+  primary: string;
+  /** Accent brand color (default #B38B4D - gold) */
+  accent: string;
+}
+
 export interface SiteSettings {
   ngoName: string;
+  ngoNameEn: string;
   ngoTagline: string;
   logoUrl?: string;
   address: string;
+  addressEn: string;
   branchAddresses: BranchOffice[];
   phone: string;
   emergencyHotline: string;
   email: string;
   officeHours: string;
+  officeHoursEn: string;
+  /** Short location line shown in the top header bar (e.g. "Bogura Sadar, Bogura, Bangladesh") */
+  headerLocation: BilingualText;
+  /** Short about text shown in the footer */
+  footerAbout: BilingualText;
+  /** Copyright line shown at the bottom of the footer */
+  footerCopyright: BilingualText;
   mapLat: number;
   mapLng: number;
   registrationNumber: string;
@@ -171,4 +193,69 @@ export interface SiteSettings {
     linkedin: string;
     twitter: string;
   };
+  theme: ThemeColors;
+}
+
+/** Editable copy for the Home page (fetched from /api/page-content). */
+export interface HomePageContent {
+  /** Notice ticker label, e.g. "SPECIAL NOTICE" / "বিশেষ নোটিশ" */
+  noticeBadge: BilingualText;
+  /** Notice ticker CTA, e.g. "VIEW NOTICE" / "নোটিশ দেখুন" */
+  viewNotice: BilingualText;
+  establishedBadge: BilingualText;
+  teaserTitle: BilingualText;
+  teaserText: BilingualText;
+  visionTitle: BilingualText;
+  visionText: BilingualText;
+  missionTitle: BilingualText;
+  missionText: BilingualText;
+  learnMoreCta: BilingualText;
+  /** Image shown on the right side of the about teaser */
+  teaserImage: string;
+  teaserImageLabel: BilingualText;
+  teaserImageCaption: BilingualText;
+  programsBadge: BilingualText;
+  programsTitle: BilingualText;
+  viewAllPrograms: BilingualText;
+  videoBadge: BilingualText;
+  videoTitle: BilingualText;
+  videoText: BilingualText;
+  watchAllVideos: BilingualText;
+  newsBadge: BilingualText;
+  newsTitle: BilingualText;
+  readAllNews: BilingualText;
+  partnersTitle: BilingualText;
+}
+
+/** Editable copy for the About page. */
+export interface LeaderProfile {
+  name: BilingualText;
+  title: BilingualText;
+  message: BilingualText;
+  photo: string;
+}
+
+export interface AboutPageContent {
+  bannerBadge: BilingualText;
+  bannerTitle: BilingualText;
+  bannerSub: BilingualText;
+  historyTitle: BilingualText;
+  history1: BilingualText;
+  history2: BilingualText;
+  vision: BilingualText;
+  mission: BilingualText;
+  messageSectionBadge: BilingualText;
+  messageSectionTitle: BilingualText;
+  chairman: LeaderProfile;
+  director: LeaderProfile;
+  legalBadge: BilingualText;
+  legalTitle: BilingualText;
+  legalSub: BilingualText;
+  /** e.g. registration numbers shown in the legal box */
+  legalItems: BilingualText[];
+}
+
+export interface PageContent {
+  home: HomePageContent;
+  about: AboutPageContent;
 }

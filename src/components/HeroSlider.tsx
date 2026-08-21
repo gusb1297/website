@@ -109,7 +109,7 @@ export const HeroSlider: React.FC<HeroSliderProps> = ({ slides }) => {
             {/* Dark Gradient Overlay for Maximum Readability */}
             <div className="absolute inset-0 bg-black/45 lg:hidden" />
             <div className="absolute inset-0 hidden lg:block gradient-overlay" />
-            <div className="absolute inset-0 hidden lg:block bg-gradient-to-r from-[#1B3022]/90 via-transparent to-transparent" />
+            <div className="absolute inset-0 hidden lg:block bg-gradient-to-r from-[color:var(--site-primary)]/90 via-transparent to-transparent" />
           </div>
         );
       })}
@@ -118,7 +118,7 @@ export const HeroSlider: React.FC<HeroSliderProps> = ({ slides }) => {
       <div className="relative z-20 container h-full flex flex-col justify-center px-6 pt-24 pb-24 lg:justify-end lg:px-6 lg:pb-24 lg:pt-20">
         <div className="max-w-3xl space-y-5 lg:space-y-6 animate-fadeIn">
           {/* Top Tag */}
-          <span className="block max-w-full text-[#B38B4D] text-xs font-bold uppercase tracking-[0.16em] sm:tracking-[0.22em] lg:tracking-[0.3em] leading-relaxed break-words">
+          <span className="block max-w-full text-[color:var(--site-accent)] text-xs font-bold uppercase tracking-[0.16em] sm:tracking-[0.22em] lg:tracking-[0.3em] leading-relaxed break-words">
             {lang === 'en'
               ? 'Village Development Organization Bogura (GUSB) - Social Advancement'
               : 'গ্রাম উন্নয়ন সংস্থা বগুড়া (GUSB) - সামাজিক অগ্রযাত্রা'}
@@ -138,7 +138,7 @@ export const HeroSlider: React.FC<HeroSliderProps> = ({ slides }) => {
           <div className="pt-2 flex flex-col lg:flex-row lg:flex-wrap items-stretch lg:items-center gap-4">
             <Link
               to={currentSlide.buttonLink || '/programs'}
-              className="inline-flex h-12 w-full lg:w-auto items-center justify-center lg:justify-start gap-2.5 bg-[#B38B4D] hover:bg-[#a17a3b] text-white px-8 py-4 rounded-sm text-xs uppercase tracking-widest font-bold transition-all shadow-xl"
+              className="inline-flex h-12 w-full lg:w-auto items-center justify-center lg:justify-start gap-2.5 bg-[color:var(--site-accent)] hover:bg-[color:var(--site-accent-dark)] text-white px-8 py-4 rounded-sm text-xs uppercase tracking-widest font-bold transition-all shadow-xl"
             >
               <span>
                 {lang === 'en' ? 'View Our Activities' : (currentSlide.buttonText || 'আমাদের কার্যক্রম দেখুন')}
@@ -164,7 +164,7 @@ export const HeroSlider: React.FC<HeroSliderProps> = ({ slides }) => {
               key={idx}
               onClick={() => setCurrentIndex(idx)}
               className={`w-2 h-2 rounded-full transition-all ${
-                idx === currentIndex ? 'bg-[#B38B4D] w-6' : 'bg-white/40'
+                idx === currentIndex ? 'bg-[color:var(--site-accent)] w-6' : 'bg-white/40'
               }`}
             />
           ))}
@@ -173,14 +173,14 @@ export const HeroSlider: React.FC<HeroSliderProps> = ({ slides }) => {
         <div className="flex gap-2 sm:gap-3">
           <button
             onClick={handlePrev}
-            className="w-11 h-11 lg:w-10 lg:h-10 border border-white/30 rounded-full flex items-center justify-center text-white hover:bg-[#B38B4D] hover:border-[#B38B4D] transition-all"
+            className="w-11 h-11 lg:w-10 lg:h-10 border border-white/30 rounded-full flex items-center justify-center text-white hover:bg-[color:var(--site-accent)] hover:border-[color:var(--site-accent)] transition-all"
             aria-label="Previous Slide"
           >
             <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
           </button>
           <button
             onClick={handleNext}
-            className="w-11 h-11 lg:w-10 lg:h-10 border border-white/30 rounded-full flex items-center justify-center text-white hover:bg-[#B38B4D] hover:border-[#B38B4D] transition-all"
+            className="w-11 h-11 lg:w-10 lg:h-10 border border-white/30 rounded-full flex items-center justify-center text-white hover:bg-[color:var(--site-accent)] hover:border-[color:var(--site-accent)] transition-all"
             aria-label="Next Slide"
           >
             <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -191,7 +191,7 @@ export const HeroSlider: React.FC<HeroSliderProps> = ({ slides }) => {
       {/* Animated Scroll Indicator */}
       <button
         onClick={scrollToNextSection}
-        className="hidden lg:flex absolute bottom-6 left-4 sm:left-8 lg:left-12 z-30 text-[#B38B4D] hover:text-white items-center gap-2 transition-all cursor-pointer text-[11px] uppercase tracking-widest font-bold"
+        className="hidden lg:flex absolute bottom-6 left-4 sm:left-8 lg:left-12 z-30 text-[color:var(--site-accent)] hover:text-white items-center gap-2 transition-all cursor-pointer text-[11px] uppercase tracking-widest font-bold"
       >
         <span>{lang === 'en' ? 'Scroll Down' : 'নিচে দেখুন'}</span>
         <ChevronDown className="w-4 h-4 animate-bounce" />

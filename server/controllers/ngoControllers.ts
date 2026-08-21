@@ -4,7 +4,8 @@ import path from 'path';
 import fs from 'fs';
 import { processVideoFile } from '../config/ffmpeg';
 import { uploadToCloudinary } from '../config/cloudinary';
-import { memoryStore } from '../models/schemas';
+import { persistStore } from '../config/persistence';
+import { memoryStore, DEFAULT_THEME } from '../models/schemas';
 import {
   HeroSlide,
   Program,
@@ -20,9 +21,17 @@ import {
   Application,
   StatItem,
   SiteSettings,
+  PageContent,
 } from '../../src/types';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'vdo_bogura_secret_key_2026';
+
+const slugify = (input: string) =>
+  input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 
 // Direct File Upload (returns uploaded URL directly)
 export const uploadDirectFile = async (req: Request, res: Response) => {
@@ -32,7 +41,7 @@ export const uploadDirectFile = async (req: Request, res: Response) => {
   try {
     const url = await uploadToCloudinary(req.file.path, 'vdo_bogura');
     return res.json({ url });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Direct file upload error:', err);
     return res.status(500).json({ error: 'Failed to upload file' });
   }
@@ -45,11 +54,18 @@ export const login = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Email and password are required' });
   }
 
-  // Pre-configured admin check
-  const validEmails = ['admin@vdobogura.org', 'admin@gusb.org', 'admin@palli-ngo.org', 'admin@gmail.com', 'admin'];
-  const isAdmin =
-    validEmails.includes(email.toLowerCase()) &&
-    (password === 'admin123password' || password === 'admin' || password === 'admin123');
+  // Production: override the demo accounts with ADMIN_EMAILS / ADMIN_PASSWORDS
+  // (comma separated) via environment variables.
+  const validEmails = (process.env.ADMIN_EMAILS || 'admin@vdobogura.org,admin@gusb.org,admin@palli-ngo.org,admin@gmail.com,admin')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const validPasswords = (process.env.ADMIN_PASSWORDS || 'admin123password,admin,admin123')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const isAdmin = validEmails.includes(email.toLowerCase()) && validPasswords.includes(password);
 
   if (isAdmin) {
     const token = jwt.sign(
@@ -98,6 +114,7 @@ export const createHeroSlide = async (req: Request, res: Response) => {
     isActive: req.body.isActive !== 'false',
   };
   memoryStore.heroSlides.push(newSlide);
+  persistStore();
   res.status(201).json(newSlide);
 };
 
@@ -113,9 +130,11 @@ export const updateHeroSlide = async (req: Request, res: Response) => {
   memoryStore.heroSlides[index] = {
     ...memoryStore.heroSlides[index],
     ...req.body,
+    id,
     order: Number(req.body.order ?? memoryStore.heroSlides[index].order),
     isActive: req.body.isActive !== undefined ? Boolean(req.body.isActive) : memoryStore.heroSlides[index].isActive,
   };
+  persistStore();
   res.json(memoryStore.heroSlides[index]);
 };
 
@@ -128,12 +147,14 @@ export const reorderHeroSlides = (req: Request, res: Response) => {
     });
   }
   memoryStore.heroSlides.sort((a, b) => a.order - b.order);
+  persistStore();
   res.json(memoryStore.heroSlides);
 };
 
 export const deleteHeroSlide = (req: Request, res: Response) => {
   const { id } = req.params;
   memoryStore.heroSlides = memoryStore.heroSlides.filter((s) => s.id !== id);
+  persistStore();
   res.json({ message: 'Slide deleted' });
 };
 
@@ -155,7 +176,7 @@ export const createProgram = async (req: Request, res: Response) => {
   if (req.file) {
     coverImage = await uploadToCloudinary(req.file.path, 'vdo_bogura/programs');
   }
-  const slug = req.body.slug || (req.body.title ? req.body.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'program-' + Date.now());
+  const slug = slugify(req.body.slug || req.body.title || '') || 'program-' + Date.now();
   const newProgram: Program = {
     id: 'prg-' + Date.now(),
     title: req.body.title,
@@ -170,6 +191,7 @@ export const createProgram = async (req: Request, res: Response) => {
     districtsCovered: Number(req.body.districtsCovered || 0),
   };
   memoryStore.programs.push(newProgram);
+  persistStore();
   res.status(201).json(newProgram);
 };
 
@@ -185,13 +207,16 @@ export const updateProgram = async (req: Request, res: Response) => {
   memoryStore.programs[index] = {
     ...memoryStore.programs[index],
     ...req.body,
+    id,
   };
+  persistStore();
   res.json(memoryStore.programs[index]);
 };
 
 export const deleteProgram = (req: Request, res: Response) => {
   const { id } = req.params;
   memoryStore.programs = memoryStore.programs.filter((p) => p.id !== id);
+  persistStore();
   res.json({ message: 'Program deleted' });
 };
 
@@ -217,6 +242,7 @@ export const getNewsBySlug = (req: Request, res: Response) => {
   const news = memoryStore.news.find((n) => n.slug === slug || n.id === slug);
   if (!news) return res.status(404).json({ error: 'News article not found' });
   news.views += 1;
+  persistStore();
   res.json(news);
 };
 
@@ -225,7 +251,7 @@ export const createNews = async (req: Request, res: Response) => {
   if (req.file) {
     thumbnail = await uploadToCloudinary(req.file.path, 'vdo_bogura/news');
   }
-  const slug = req.body.slug || (req.body.title ? req.body.title.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'news-' + Date.now());
+  const slug = slugify(req.body.slug || req.body.title || '') || 'news-' + Date.now();
   const newNews: NewsItem = {
     id: 'news-' + Date.now(),
     title: req.body.title,
@@ -238,6 +264,7 @@ export const createNews = async (req: Request, res: Response) => {
     author: req.body.author || 'সিস্টেম অ্যাডমিন',
   };
   memoryStore.news.unshift(newNews);
+  persistStore();
   res.status(201).json(newNews);
 };
 
@@ -253,13 +280,16 @@ export const updateNews = async (req: Request, res: Response) => {
   memoryStore.news[index] = {
     ...memoryStore.news[index],
     ...req.body,
+    id,
   };
+  persistStore();
   res.json(memoryStore.news[index]);
 };
 
 export const deleteNews = (req: Request, res: Response) => {
   const { id } = req.params;
   memoryStore.news = memoryStore.news.filter((n) => n.id !== id);
+  persistStore();
   res.json({ message: 'News item deleted' });
 };
 
@@ -276,13 +306,8 @@ export const uploadVideo = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Please upload a video file' });
   }
 
-  let filePath = `/uploads/videos/${req.file.filename}`;
-  const absolutePath = path.join(process.cwd(), req.file.path);
-
-  const { thumbnailPath, duration } = await processVideoFile(absolutePath);
-
-  // If Cloudinary configured, upload video file
-  filePath = await uploadToCloudinary(req.file.path, 'vdo_bogura/videos');
+  const { thumbnailPath, duration } = await processVideoFile(req.file.path);
+  const filePath = await uploadToCloudinary(req.file.path, 'vdo_bogura/videos');
 
   const newVid: VideoItem = {
     id: 'vid-' + Date.now(),
@@ -296,6 +321,7 @@ export const uploadVideo = async (req: Request, res: Response) => {
   };
 
   memoryStore.videos.unshift(newVid);
+  persistStore();
   res.status(201).json(newVid);
 };
 
@@ -322,6 +348,7 @@ export const embedVideo = (req: Request, res: Response) => {
   };
 
   memoryStore.videos.unshift(newVid);
+  persistStore();
   res.status(201).json(newVid);
 };
 
@@ -370,6 +397,7 @@ export const streamVideo = (req: Request, res: Response) => {
 export const deleteVideo = (req: Request, res: Response) => {
   const { id } = req.params;
   memoryStore.videos = memoryStore.videos.filter((v) => v.id !== id);
+  persistStore();
   res.json({ message: 'Video deleted' });
 };
 
@@ -397,17 +425,39 @@ export const createNotice = async (req: Request, res: Response) => {
     title: req.body.title,
     pdfFile: pdfFile || '/uploads/pdfs/sample_notice.pdf',
     publishedAt: req.body.publishedAt || new Date().toISOString(),
-    expiryDate: req.body.expiryDate,
-    isActive: true,
+    expiryDate: req.body.expiryDate || undefined,
+    isActive: req.body.isActive !== 'false',
     referenceNo: req.body.referenceNo || `VDO/NOT/${Date.now().toString().slice(-4)}`,
   };
   memoryStore.notices.unshift(newNotice);
+  persistStore();
   res.status(201).json(newNotice);
+};
+
+export const updateNotice = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const index = memoryStore.notices.findIndex((n) => n.id === id);
+  if (index === -1) return res.status(404).json({ error: 'Notice not found' });
+
+  if (req.file) {
+    req.body.pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/notices');
+  }
+
+  memoryStore.notices[index] = {
+    ...memoryStore.notices[index],
+    ...req.body,
+    id,
+    isActive:
+      req.body.isActive !== undefined ? Boolean(req.body.isActive) : memoryStore.notices[index].isActive,
+  };
+  persistStore();
+  res.json(memoryStore.notices[index]);
 };
 
 export const deleteNotice = (req: Request, res: Response) => {
   const { id } = req.params;
   memoryStore.notices = memoryStore.notices.filter((n) => n.id !== id);
+  persistStore();
   res.json({ message: 'Notice deleted' });
 };
 
@@ -447,12 +497,33 @@ export const createPublication = async (req: Request, res: Response) => {
     thumbnail: thumbnail || 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=400&q=80',
   };
   memoryStore.publications.unshift(newPub);
+  persistStore();
   res.status(201).json(newPub);
+};
+
+export const updatePublication = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const index = memoryStore.publications.findIndex((p) => p.id === id);
+  if (index === -1) return res.status(404).json({ error: 'Publication not found' });
+
+  if (req.file) {
+    req.body.pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/publications');
+  }
+
+  memoryStore.publications[index] = {
+    ...memoryStore.publications[index],
+    ...req.body,
+    id,
+    year: Number(req.body.year ?? memoryStore.publications[index].year),
+  };
+  persistStore();
+  res.json(memoryStore.publications[index]);
 };
 
 export const deletePublication = (req: Request, res: Response) => {
   const { id } = req.params;
   memoryStore.publications = memoryStore.publications.filter((p) => p.id !== id);
+  persistStore();
   res.json({ message: 'Publication deleted' });
 };
 
@@ -474,13 +545,44 @@ export const createAlbum = async (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
   memoryStore.galleryAlbums.unshift(newAlbum);
+  persistStore();
   res.status(201).json(newAlbum);
+};
+
+export const updateAlbum = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const index = memoryStore.galleryAlbums.findIndex((a) => a.id === id);
+  if (index === -1) return res.status(404).json({ error: 'Album not found' });
+
+  if (req.file) {
+    req.body.coverImage = await uploadToCloudinary(req.file.path, 'vdo_bogura/gallery');
+  }
+
+  memoryStore.galleryAlbums[index] = {
+    ...memoryStore.galleryAlbums[index],
+    ...req.body,
+    id,
+  };
+  persistStore();
+  res.json(memoryStore.galleryAlbums[index]);
+};
+
+export const deleteAlbum = (req: Request, res: Response) => {
+  const { id } = req.params;
+  memoryStore.galleryAlbums = memoryStore.galleryAlbums.filter((a) => a.id !== id);
+  memoryStore.galleryPhotos = memoryStore.galleryPhotos.filter((p) => p.albumId !== id);
+  persistStore();
+  res.json({ message: 'Album and its photos deleted' });
 };
 
 export const getAlbumPhotos = (req: Request, res: Response) => {
   const { id } = req.params;
   const photos = memoryStore.galleryPhotos.filter((p) => p.albumId === id);
   res.json(photos);
+};
+
+export const getAllPhotos = (req: Request, res: Response) => {
+  res.json(memoryStore.galleryPhotos);
 };
 
 export const addPhoto = async (req: Request, res: Response) => {
@@ -496,7 +598,29 @@ export const addPhoto = async (req: Request, res: Response) => {
     uploadedAt: new Date().toISOString(),
   };
   memoryStore.galleryPhotos.push(newPhoto);
+  persistStore();
   res.status(201).json(newPhoto);
+};
+
+export const updatePhoto = (req: Request, res: Response) => {
+  const { id } = req.params;
+  const index = memoryStore.galleryPhotos.findIndex((p) => p.id === id);
+  if (index === -1) return res.status(404).json({ error: 'Photo not found' });
+
+  memoryStore.galleryPhotos[index] = {
+    ...memoryStore.galleryPhotos[index],
+    ...req.body,
+    id,
+  };
+  persistStore();
+  res.json(memoryStore.galleryPhotos[index]);
+};
+
+export const deletePhoto = (req: Request, res: Response) => {
+  const { id } = req.params;
+  memoryStore.galleryPhotos = memoryStore.galleryPhotos.filter((p) => p.id !== id);
+  persistStore();
+  res.json({ message: 'Photo deleted' });
 };
 
 // 9. COMMITTEE / GOVERNANCE
@@ -527,6 +651,7 @@ export const createCommitteeMember = async (req: Request, res: Response) => {
     phone: req.body.phone,
   };
   memoryStore.committee.push(newMember);
+  persistStore();
   res.status(201).json(newMember);
 };
 
@@ -542,13 +667,16 @@ export const updateCommitteeMember = async (req: Request, res: Response) => {
   memoryStore.committee[index] = {
     ...memoryStore.committee[index],
     ...req.body,
+    id,
   };
+  persistStore();
   res.json(memoryStore.committee[index]);
 };
 
 export const deleteCommitteeMember = (req: Request, res: Response) => {
   const { id } = req.params;
   memoryStore.committee = memoryStore.committee.filter((c) => c.id !== id);
+  persistStore();
   res.json({ message: 'Member removed' });
 };
 
@@ -569,12 +697,32 @@ export const createPartner = async (req: Request, res: Response) => {
     websiteUrl: req.body.websiteUrl || '#',
   };
   memoryStore.partners.push(newPartner);
+  persistStore();
   res.status(201).json(newPartner);
+};
+
+export const updatePartner = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const index = memoryStore.partners.findIndex((p) => p.id === id);
+  if (index === -1) return res.status(404).json({ error: 'Partner not found' });
+
+  if (req.file) {
+    req.body.logo = await uploadToCloudinary(req.file.path, 'vdo_bogura/partners');
+  }
+
+  memoryStore.partners[index] = {
+    ...memoryStore.partners[index],
+    ...req.body,
+    id,
+  };
+  persistStore();
+  res.json(memoryStore.partners[index]);
 };
 
 export const deletePartner = (req: Request, res: Response) => {
   const { id } = req.params;
   memoryStore.partners = memoryStore.partners.filter((p) => p.id !== id);
+  persistStore();
   res.json({ message: 'Partner removed' });
 };
 
@@ -609,7 +757,36 @@ export const createCareer = async (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
   memoryStore.careers.unshift(newCircular);
+  persistStore();
   res.status(201).json(newCircular);
+};
+
+export const updateCareer = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const index = memoryStore.careers.findIndex((c) => c.id === id);
+  if (index === -1) return res.status(404).json({ error: 'Career circular not found' });
+
+  if (req.file) {
+    req.body.pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/careers');
+  }
+
+  memoryStore.careers[index] = {
+    ...memoryStore.careers[index],
+    ...req.body,
+    id,
+    vacancy: Number(req.body.vacancy ?? memoryStore.careers[index].vacancy),
+    isActive:
+      req.body.isActive !== undefined ? Boolean(req.body.isActive) : memoryStore.careers[index].isActive,
+  };
+  persistStore();
+  res.json(memoryStore.careers[index]);
+};
+
+export const deleteCareer = (req: Request, res: Response) => {
+  const { id } = req.params;
+  memoryStore.careers = memoryStore.careers.filter((c) => c.id !== id);
+  persistStore();
+  res.json({ message: 'Career circular deleted' });
 };
 
 export const applyJob = async (req: Request, res: Response) => {
@@ -642,6 +819,7 @@ export const applyJob = async (req: Request, res: Response) => {
   };
 
   memoryStore.applications.unshift(newApp);
+  persistStore();
   res.status(201).json({ message: 'আপনার আবেদনপত্র সফলভাবে জমা হয়েছে। ধন্যবাদ!', application: newApp });
 };
 
@@ -649,10 +827,31 @@ export const getApplications = (req: Request, res: Response) => {
   res.json(memoryStore.applications);
 };
 
-// 12. STATS & SETTINGS
+export const deleteApplication = (req: Request, res: Response) => {
+  const { id } = req.params;
+  memoryStore.applications = memoryStore.applications.filter((a) => a.id !== id);
+  persistStore();
+  res.json({ message: 'Application deleted' });
+};
+
+// 12. STATS
 export const getStats = (req: Request, res: Response) => {
   const stats = [...memoryStore.stats].sort((a, b) => a.order - b.order);
   res.json(stats);
+};
+
+export const createStat = (req: Request, res: Response) => {
+  const newStat: StatItem = {
+    id: 'st-' + Date.now(),
+    label: req.body.label || 'নতুন পরিসংখ্যান',
+    value: Number(req.body.value || 0),
+    suffix: req.body.suffix || '+',
+    icon: req.body.icon || 'Users',
+    order: memoryStore.stats.length + 1,
+  };
+  memoryStore.stats.push(newStat);
+  persistStore();
+  res.status(201).json(newStat);
 };
 
 export const updateStat = (req: Request, res: Response) => {
@@ -663,23 +862,84 @@ export const updateStat = (req: Request, res: Response) => {
   memoryStore.stats[index] = {
     ...memoryStore.stats[index],
     ...req.body,
+    id,
     value: Number(req.body.value ?? memoryStore.stats[index].value),
+    order: Number(req.body.order ?? memoryStore.stats[index].order),
   };
+  persistStore();
   res.json(memoryStore.stats[index]);
 };
 
+export const deleteStat = (req: Request, res: Response) => {
+  const { id } = req.params;
+  memoryStore.stats = memoryStore.stats.filter((s) => s.id !== id);
+  persistStore();
+  res.json({ message: 'Stat item deleted' });
+};
+
+// 13. SETTINGS (identity, contact, theme colors)
 export const getSettings = (req: Request, res: Response) => {
   res.json(memoryStore.settings);
 };
 
+/** FormData submits nested objects as JSON strings - parse them back. */
+function parseJsonField(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch (e) {
+    return value;
+  }
+}
+
 export const updateSettings = async (req: Request, res: Response) => {
-  let updatedData = { ...req.body };
+  let updatedData = { ...req.body } as Record<string, unknown>;
   if (req.file) {
     updatedData.logoUrl = await uploadToCloudinary(req.file.path, 'vdo_bogura/settings');
   }
+
+  ['theme', 'socialLinks', 'branchAddresses', 'headerLocation', 'footerAbout', 'footerCopyright'].forEach(
+    (key) => {
+      if (key in updatedData) {
+        updatedData[key] = parseJsonField(updatedData[key]);
+      }
+    }
+  );
+
+  // Merge theme carefully so a missing key never wipes the active colors.
+  const theme = updatedData.theme as { primary?: string; accent?: string } | undefined;
+  if (theme) {
+    updatedData.theme = {
+      primary: theme.primary || memoryStore.settings.theme?.primary || DEFAULT_THEME.primary,
+      accent: theme.accent || memoryStore.settings.theme?.accent || DEFAULT_THEME.accent,
+    };
+  }
+
   memoryStore.settings = {
     ...memoryStore.settings,
-    ...updatedData,
+    ...(updatedData as Partial<SiteSettings>),
   };
+  persistStore();
   res.json(memoryStore.settings);
+};
+
+// 14. PAGE CONTENT (Home & About editable copy)
+export const getPageContent = (req: Request, res: Response) => {
+  res.json(memoryStore.pageContent);
+};
+
+export const updatePageContent = async (req: Request, res: Response) => {
+  const incoming: Partial<PageContent> = req.body || {};
+  const current = memoryStore.pageContent as Partial<PageContent>;
+
+  const next: PageContent = {
+    home: { ...(current.home as object), ...(incoming.home || {}) } as PageContent['home'],
+    about: { ...(current.about as object), ...(incoming.about || {}) } as PageContent['about'],
+  };
+
+  memoryStore.pageContent = next;
+  persistStore();
+  res.json(memoryStore.pageContent);
 };
