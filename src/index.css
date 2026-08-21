@@ -154,3 +154,13 @@
   backdrop-filter: blur(12px);
   border: 1px solid color-mix(in srgb, var(--site-accent) 30%, transparent);
 }
+
+/* Responsive admin panel improvements */
+@media (max-width: 768px) {
+  .admin-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .admin-edit-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

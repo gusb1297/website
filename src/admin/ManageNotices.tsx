@@ -12,19 +12,17 @@ export const ManageNotices: React.FC = () => {
   const [referenceNo, setReferenceNo] = useState('GUSB/NOTICE/2026/001');
   const [expiryDate, setExpiryDate] = useState('');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [pdfUrl, setPdfUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const [editing, setEditing] = useState<Notice | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editReference, setEditReference] = useState('');
   const [editExpiry, setEditExpiry] = useState('');
-  const [editPdfUrl, setEditPdfUrl] = useState('');
   const [editPdfFile, setEditPdfFile] = useState<File | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pdfFile && !pdfUrl) {
+    if (!pdfFile) {
       alert('অনুগ্রহ করে নোটিশের পিডিএফ ফাইল বা PDF URL দিন');
       return;
     }
@@ -38,7 +36,7 @@ export const ManageNotices: React.FC = () => {
       if (pdfFile) {
         formData.append('pdfFile', pdfFile);
       } else {
-        formData.append('pdfFile', pdfUrl);
+        formData.append('pdfFile', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
       }
 
       const res = await fetch('/api/notices', {
@@ -51,7 +49,6 @@ export const ManageNotices: React.FC = () => {
 
       setTitle('');
       setPdfFile(null);
-      setPdfUrl('');
       setExpiryDate('');
       refetch();
     } catch (err) {
@@ -66,7 +63,6 @@ export const ManageNotices: React.FC = () => {
     setEditTitle(notice.title);
     setEditReference(notice.referenceNo || '');
     setEditExpiry(notice.expiryDate ? String(notice.expiryDate).slice(0, 10) : '');
-    setEditPdfUrl(notice.pdfFile);
     setEditPdfFile(null);
   };
 
@@ -80,8 +76,6 @@ export const ManageNotices: React.FC = () => {
       formData.append('isActive', String(editing.isActive));
       if (editPdfFile) {
         formData.append('pdfFile', editPdfFile);
-      } else if (editPdfUrl) {
-        formData.append('pdfFile', editPdfUrl);
       }
       const res = await fetch(`/api/notices/${editing.id}`, {
         method: 'PUT',
@@ -174,21 +168,13 @@ export const ManageNotices: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 mb-1">নোটিশ পিডিএফ ফাইল (PDF)</label>
               <input
                 type="file"
+                required
                 accept=".pdf"
                 onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">অথবা PDF URL দিন</label>
-              <input
-                type="text"
-                placeholder="https://..."
-                value={pdfUrl}
-                onChange={(e) => setPdfUrl(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
-              />
-            </div>
+
           </div>
 
           <button
@@ -252,7 +238,7 @@ export const ManageNotices: React.FC = () => {
                   <input type="text" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="col-span-2 md:col-span-1 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="শিরোনাম" />
                   <input type="text" value={editReference} onChange={(e) => setEditReference(e.target.value)} className="col-span-2 md:col-span-1 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="স্মারক নম্বর" />
                   <input type="date" value={editExpiry} onChange={(e) => setEditExpiry(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" />
-                  <input type="text" value={editPdfUrl} onChange={(e) => setEditPdfUrl(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="PDF URL" />
+                  <p className="text-xs text-slate-400">পিডিএফ পরিবর্তনের জন্য নতুন ফাইল আপলোড করুন (ঐচ্ছিক)</p>
                   <input type="file" accept=".pdf" onChange={(e) => setEditPdfFile(e.target.files?.[0] || null)} className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" />
                   <div className="col-span-2 flex gap-2">
                     <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">

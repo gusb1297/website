@@ -18,7 +18,7 @@ export const ManagePrograms: React.FC = () => {
   const [beneficiariesCount, setBeneficiariesCount] = useState(10000);
   const [districtsCovered, setDistrictsCovered] = useState(5);
   const [coverFile, setCoverFile] = useState<File | null>(null);
-  const [coverUrl, setCoverUrl] = useState('');
+  // URL input removed - direct upload only
   const [submitting, setSubmitting] = useState(false);
 
   const [editing, setEditing] = useState<Program | null>(null);
@@ -29,7 +29,6 @@ export const ManagePrograms: React.FC = () => {
   const [editStatus, setEditStatus] = useState<'ongoing' | 'completed'>('ongoing');
   const [editBeneficiaries, setEditBeneficiaries] = useState(0);
   const [editDistricts, setEditDistricts] = useState(0);
-  const [editCoverUrl, setEditCoverUrl] = useState('');
   const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -49,7 +48,7 @@ export const ManagePrograms: React.FC = () => {
       if (coverFile) {
         formData.append('coverImage', coverFile);
       } else {
-        formData.append('coverImage', coverUrl || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
+        formData.append('coverImage', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
       }
 
       const res = await fetch('/api/programs', {
@@ -64,7 +63,6 @@ export const ManagePrograms: React.FC = () => {
       setShortDesc('');
       setContent('');
       setCoverFile(null);
-      setCoverUrl('');
       refetch();
     } catch (err) {
       alert('ত্রুটি ঘটেছে');
@@ -82,7 +80,6 @@ export const ManagePrograms: React.FC = () => {
     setEditStatus(prog.status);
     setEditBeneficiaries(prog.beneficiariesCount || 0);
     setEditDistricts(prog.districtsCovered || 0);
-    setEditCoverUrl(prog.coverImage);
     setEditCoverFile(null);
   };
 
@@ -99,8 +96,6 @@ export const ManagePrograms: React.FC = () => {
       formData.append('districtsCovered', String(editDistricts));
       if (editCoverFile) {
         formData.append('coverImage', editCoverFile);
-      } else if (editCoverUrl) {
-        formData.append('coverImage', editCoverUrl);
       }
       const res = await fetch(`/api/programs/${editing.id}`, {
         method: 'PUT',
@@ -221,25 +216,17 @@ export const ManagePrograms: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">কভার ইমেজ আপলোড (Multer)</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">কভার ইমেজ আপলোড (Direct Upload)</label>
               <input
                 type="file"
+                required
                 accept="image/*"
                 onChange={(e) => setCoverFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">অথবা ছবি URL দিন</label>
-              <input
-                type="text"
-                placeholder="https://..."
-                value={coverUrl}
-                onChange={(e) => setCoverUrl(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
-              />
-            </div>
+
           </div>
 
           <button
@@ -288,7 +275,6 @@ export const ManagePrograms: React.FC = () => {
                   </div>
                   <input type="number" value={editBeneficiaries} onChange={(e) => setEditBeneficiaries(Number(e.target.value))} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="উপকৃত সংখ্যা" />
                   <input type="number" value={editDistricts} onChange={(e) => setEditDistricts(Number(e.target.value))} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="জেলা সংখ্যা" />
-                  <input type="text" value={editCoverUrl} onChange={(e) => setEditCoverUrl(e.target.value)} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="কভার ছবি URL" />
                   <input type="file" accept="image/*" onChange={(e) => setEditCoverFile(e.target.files?.[0] || null)} className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" />
                   <div className="col-span-2 flex gap-2">
                     <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">

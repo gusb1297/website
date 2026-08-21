@@ -51,6 +51,7 @@ export const Dashboard: React.FC = () => {
   const { user, logout, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>('slides');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   if (!isAuthenticated) {
     return (
@@ -123,14 +124,26 @@ export const Dashboard: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Left Sidebar Navigation */}
           <div className="lg:col-span-3 space-y-2">
-            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-md space-y-1">
+            <div className="lg:hidden mb-2">
+              <button
+                onClick={() => setMobileNavOpen(!mobileNavOpen)}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-emerald-950 text-amber-400 font-bold text-xs shadow-md"
+              >
+                <span>মেনু</span>
+                <span className="text-sm">{mobileNavOpen ? '▲' : '▼'}</span>
+              </button>
+            </div>
+            <div className={`${mobileNavOpen ? 'block' : 'hidden'} lg:block bg-white p-3 rounded-2xl border border-slate-200 shadow-md space-y-1`}>
               <p className="px-4 pt-1 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                 কন্টেন্ট ম্যানেজমেন্ট
               </p>
               {navItems.map((item) => (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => {
+                    setActiveTab(item.id);
+                    if (window.innerWidth < 1024) setMobileNavOpen(false);
+                  }}
                   className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-bold transition-all text-left ${
                     activeTab === item.id
                       ? 'bg-emerald-950 text-amber-400 shadow-md'

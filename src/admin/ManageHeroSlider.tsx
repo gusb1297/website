@@ -13,7 +13,6 @@ export const ManageHeroSlider: React.FC = () => {
   const [buttonText, setButtonText] = useState('আমাদের কার্যক্রম');
   const [buttonLink, setButtonLink] = useState('/programs');
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imageUrl, setImageUrl] = useState('');
   const [creating, setCreating] = useState(false);
 
   const [editing, setEditing] = useState<HeroSlide | null>(null);
@@ -21,7 +20,6 @@ export const ManageHeroSlider: React.FC = () => {
   const [editSubtext, setEditSubtext] = useState('');
   const [editButtonText, setEditButtonText] = useState('');
   const [editButtonLink, setEditButtonLink] = useState('');
-  const [editImageUrl, setEditImageUrl] = useState('');
   const [editImageFile, setEditImageFile] = useState<File | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -38,8 +36,6 @@ export const ManageHeroSlider: React.FC = () => {
 
       if (imageFile) {
         formData.append('image', imageFile);
-      } else {
-        formData.append('image', imageUrl || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=1200&q=80');
       }
 
       const res = await fetch('/api/hero-slides', {
@@ -55,7 +51,6 @@ export const ManageHeroSlider: React.FC = () => {
       setHeadline('');
       setSubtext('');
       setImageFile(null);
-      setImageUrl('');
       refetch();
     } catch (err) {
       alert('স্লাইড যোগ করতে সমস্যা হয়েছে');
@@ -86,7 +81,6 @@ export const ManageHeroSlider: React.FC = () => {
     setEditSubtext(slide.subtext);
     setEditButtonText(slide.buttonText || '');
     setEditButtonLink(slide.buttonLink || '');
-    setEditImageUrl(slide.image);
     setEditImageFile(null);
   };
 
@@ -101,8 +95,6 @@ export const ManageHeroSlider: React.FC = () => {
       formData.append('isActive', String(editing.isActive));
       if (editImageFile) {
         formData.append('image', editImageFile);
-      } else if (editImageUrl) {
-        formData.append('image', editImageUrl);
       }
       const res = await fetch(`/api/hero-slides/${editing.id}`, {
         method: 'PUT',
@@ -186,23 +178,13 @@ export const ManageHeroSlider: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">ছবি ফাইল আপলোড করুন (Multer)</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">ছবি ফাইল আপলোড করুন (Direct Upload)</label>
               <input
                 type="file"
+                required
                 accept="image/*"
                 onChange={(e) => setImageFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">অথবা ছবি ইমেজ URL দিন</label>
-              <input
-                type="text"
-                placeholder="https://..."
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
             </div>
           </div>
@@ -296,13 +278,6 @@ export const ManageHeroSlider: React.FC = () => {
                     onChange={(e) => setEditButtonLink(e.target.value)}
                     className="px-3 py-2 rounded-lg text-xs border border-slate-300"
                     placeholder="বাটন লিঙ্ক (যেমন: /programs)"
-                  />
-                  <input
-                    type="text"
-                    value={editImageUrl}
-                    onChange={(e) => setEditImageUrl(e.target.value)}
-                    className="px-3 py-2 rounded-lg text-xs border border-slate-300"
-                    placeholder="ছবি URL"
                   />
                   <input
                     type="file"
