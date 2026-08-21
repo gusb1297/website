@@ -15,7 +15,6 @@ export const ManageNews: React.FC = () => {
   const [category, setCategory] = useState('News');
   const [author, setAuthor] = useState('পাবলিক রিলেশনস অফিসার');
   const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
-  const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const [editing, setEditing] = useState<NewsItem | null>(null);
@@ -23,7 +22,6 @@ export const ManageNews: React.FC = () => {
   const [editContent, setEditContent] = useState('');
   const [editCategory, setEditCategory] = useState('News');
   const [editAuthor, setEditAuthor] = useState('');
-  const [editThumbnailUrl, setEditThumbnailUrl] = useState('');
   const [editThumbnailFile, setEditThumbnailFile] = useState<File | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,7 +38,7 @@ export const ManageNews: React.FC = () => {
       if (thumbnailFile) {
         formData.append('thumbnail', thumbnailFile);
       } else {
-        formData.append('thumbnail', thumbnailUrl || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
+        formData.append('thumbnail', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
       }
 
       const res = await fetch('/api/news', {
@@ -54,7 +52,6 @@ export const ManageNews: React.FC = () => {
       setTitle('');
       setContent('');
       setThumbnailFile(null);
-      setThumbnailUrl('');
       refetch();
     } catch (err) {
       alert('ত্রুটি ঘটেছে');
@@ -69,7 +66,6 @@ export const ManageNews: React.FC = () => {
     setEditContent(news.content);
     setEditCategory(news.category);
     setEditAuthor(news.author || '');
-    setEditThumbnailUrl(news.thumbnail);
     setEditThumbnailFile(null);
   };
 
@@ -83,8 +79,6 @@ export const ManageNews: React.FC = () => {
       formData.append('author', editAuthor);
       if (editThumbnailFile) {
         formData.append('thumbnail', editThumbnailFile);
-      } else if (editThumbnailUrl) {
-        formData.append('thumbnail', editThumbnailUrl);
       }
       const res = await fetch(`/api/news/${editing.id}`, {
         method: 'PUT',
@@ -170,25 +164,17 @@ export const ManageNews: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">ছবি আপলোড (Multer)</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">ছবি আপলোড (Direct Upload)</label>
               <input
                 type="file"
+                required
                 accept="image/*"
                 onChange={(e) => setThumbnailFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">অথবা ছবি URL দিন</label>
-              <input
-                type="text"
-                placeholder="https://..."
-                value={thumbnailUrl}
-                onChange={(e) => setThumbnailUrl(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
-              />
-            </div>
+
           </div>
 
           <button
@@ -230,7 +216,6 @@ export const ManageNews: React.FC = () => {
                   </select>
                   <input type="text" value={editAuthor} onChange={(e) => setEditAuthor(e.target.value)} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="লেখক" />
                   <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={4} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="মূল লেখা" />
-                  <input type="text" value={editThumbnailUrl} onChange={(e) => setEditThumbnailUrl(e.target.value)} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="ছবি URL" />
                   <input type="file" accept="image/*" onChange={(e) => setEditThumbnailFile(e.target.files?.[0] || null)} className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" />
                   <div className="col-span-2 flex gap-2">
                     <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">

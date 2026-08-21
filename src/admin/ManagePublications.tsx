@@ -12,18 +12,16 @@ export const ManagePublications: React.FC = () => {
   const [type, setType] = useState<'annual_report' | 'newsletter' | 'report'>('annual_report');
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [pdfUrl, setPdfUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const [editing, setEditing] = useState<Publication | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editType, setEditType] = useState<Publication['type']>('annual_report');
   const [editYear, setEditYear] = useState('');
-  const [editPdfUrl, setEditPdfUrl] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pdfFile && !pdfUrl) {
+    if (!pdfFile) {
       alert('অনুগ্রহ করে একটি পিডিএফ ফাইল নির্বাচন করুন অথবা PDF URL দিন');
       return;
     }
@@ -37,7 +35,7 @@ export const ManagePublications: React.FC = () => {
       if (pdfFile) {
         formData.append('pdfFile', pdfFile);
       } else {
-        formData.append('pdfFile', pdfUrl);
+        formData.append('pdfFile', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
       }
 
       const res = await fetch('/api/publications', {
@@ -50,8 +48,7 @@ export const ManagePublications: React.FC = () => {
 
       setTitle('');
       setPdfFile(null);
-      setPdfUrl('');
-      refetch();
+        refetch();
     } catch (err) {
       alert('ত্রুটি ঘটেছে');
     } finally {
@@ -64,7 +61,6 @@ export const ManagePublications: React.FC = () => {
     setEditTitle(pub.title);
     setEditType(pub.type);
     setEditYear(String(pub.year));
-    setEditPdfUrl(pub.pdfFile);
   };
 
   const handleSaveEdit = async () => {
@@ -74,7 +70,7 @@ export const ManagePublications: React.FC = () => {
       formData.append('title', editTitle);
       formData.append('type', editType);
       formData.append('year', editYear);
-      if (editPdfUrl) formData.append('pdfFile', editPdfUrl);
+      // PDF kept as-is; upload new file if needed
       const res = await fetch(`/api/publications/${editing.id}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
@@ -151,21 +147,13 @@ export const ManagePublications: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 mb-1">পিডিএফ ফাইল (PDF Document Upload)</label>
               <input
                 type="file"
+                required
                 accept=".pdf"
                 onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">অথবা PDF URL দিন</label>
-              <input
-                type="text"
-                placeholder="https://..."
-                value={pdfUrl}
-                onChange={(e) => setPdfUrl(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
-              />
-            </div>
+
           </div>
 
           <button
@@ -203,7 +191,7 @@ export const ManagePublications: React.FC = () => {
                     <option value="report">Research Report</option>
                   </select>
                   <input type="number" value={editYear} onChange={(e) => setEditYear(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="বছর" />
-                  <input type="text" value={editPdfUrl} onChange={(e) => setEditPdfUrl(e.target.value)} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="PDF URL" />
+                  <p className="col-span-2 text-[10px] text-slate-400">পিডিএফ পরিবর্তনের জন্য নতুন ফাইল আপলোড করুন (অপশনাল)</p>
                   <div className="col-span-2 flex gap-2">
                     <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">
                       <Save className="w-3.5 h-3.5" /> আপডেট সেভ করুন

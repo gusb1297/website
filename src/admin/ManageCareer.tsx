@@ -17,7 +17,6 @@ export const ManageCareer: React.FC = () => {
   const [deadline, setDeadline] = useState('2026-12-31');
   const [description, setDescription] = useState('');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [pdfUrl, setPdfUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const [editing, setEditing] = useState<CareerCircular | null>(null);
@@ -26,7 +25,6 @@ export const ManageCareer: React.FC = () => {
   const [editLocation, setEditLocation] = useState('');
   const [editDeadline, setEditDeadline] = useState('');
   const [editDescription, setEditDescription] = useState('');
-  const [editPdfUrl, setEditPdfUrl] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,8 +39,8 @@ export const ManageCareer: React.FC = () => {
       formData.append('description', description);
       if (pdfFile) {
         formData.append('pdfFile', pdfFile);
-      } else if (pdfUrl) {
-        formData.append('pdfFile', pdfUrl);
+      } else {
+        formData.append('pdfFile', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
       }
 
       const res = await fetch('/api/career', {
@@ -56,7 +54,6 @@ export const ManageCareer: React.FC = () => {
       setTitle('');
       setDescription('');
       setPdfFile(null);
-      setPdfUrl('');
       refetchCareers();
     } catch (err) {
       alert('ত্রুটি ঘটেছে');
@@ -72,7 +69,6 @@ export const ManageCareer: React.FC = () => {
     setEditLocation(circular.location);
     setEditDeadline(String(circular.deadline).slice(0, 10));
     setEditDescription(circular.description);
-    setEditPdfUrl(circular.pdfFile || '');
   };
 
   const handleSaveEdit = async () => {
@@ -85,7 +81,7 @@ export const ManageCareer: React.FC = () => {
       formData.append('deadline', editDeadline);
       formData.append('description', editDescription);
       formData.append('isActive', String(editing.isActive));
-      if (editPdfUrl) formData.append('pdfFile', editPdfUrl);
+      // PDF kept as-is; upload new file separately if needed
       const res = await fetch(`/api/career/${editing.id}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
@@ -212,21 +208,13 @@ export const ManageCareer: React.FC = () => {
               <label className="block text-xs font-bold text-slate-700 mb-1">অফিশিয়াল সার্কুলার পিডিএফ (PDF File)</label>
               <input
                 type="file"
+                required
                 accept=".pdf"
                 onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">অথবা PDF URL দিন</label>
-              <input
-                type="text"
-                placeholder="https://..."
-                value={pdfUrl}
-                onChange={(e) => setPdfUrl(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
-              />
-            </div>
+
           </div>
 
           <button
@@ -276,7 +264,6 @@ export const ManageCareer: React.FC = () => {
                   <input type="number" value={editVacancy} onChange={(e) => setEditVacancy(Number(e.target.value))} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="পদসংখ্যা" />
                   <input type="text" value={editLocation} onChange={(e) => setEditLocation(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="কর্মস্থল" />
                   <input type="date" value={editDeadline} onChange={(e) => setEditDeadline(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" />
-                  <input type="text" value={editPdfUrl} onChange={(e) => setEditPdfUrl(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="PDF URL" />
                   <textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows={3} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="বিবরণ" />
                   <div className="col-span-2 flex gap-2">
                     <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">

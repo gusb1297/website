@@ -11,12 +11,10 @@ export const ManagePartners: React.FC = () => {
   const [name, setName] = useState('');
   const [websiteUrl, setWebsiteUrl] = useState('');
   const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [logoUrl, setLogoUrl] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Partner | null>(null);
   const [editName, setEditName] = useState('');
   const [editUrl, setEditUrl] = useState('');
-  const [editLogoUrl, setEditLogoUrl] = useState('');
   const [editLogoFile, setEditLogoFile] = useState<File | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -29,7 +27,7 @@ export const ManagePartners: React.FC = () => {
       if (logoFile) {
         formData.append('logo', logoFile);
       } else {
-        formData.append('logo', logoUrl || 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?auto=format&fit=crop&w=200&q=80');
+        formData.append('logo', 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?auto=format&fit=crop&w=200&q=80');
       }
       const res = await fetch('/api/partners', {
         method: 'POST',
@@ -40,7 +38,6 @@ export const ManagePartners: React.FC = () => {
       setName('');
       setWebsiteUrl('');
       setLogoFile(null);
-      setLogoUrl('');
       refetch();
     } catch (e) {
       alert('ত্রুটি ঘটেছে');
@@ -53,7 +50,6 @@ export const ManagePartners: React.FC = () => {
     setEditing(partner);
     setEditName(partner.name);
     setEditUrl(partner.websiteUrl || '');
-    setEditLogoUrl(partner.logo || '');
     setEditLogoFile(null);
   };
 
@@ -65,8 +61,6 @@ export const ManagePartners: React.FC = () => {
       formData.append('websiteUrl', editUrl);
       if (editLogoFile) {
         formData.append('logo', editLogoFile);
-      } else if (editLogoUrl) {
-        formData.append('logo', editLogoUrl);
       }
       const res = await fetch(`/api/partners/${editing.id}`, {
         method: 'PUT',
@@ -128,24 +122,16 @@ export const ManagePartners: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">লোগো আপলোড</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">লোগো আপলোড (Direct Upload)</label>
               <input
                 type="file"
+                required
                 accept="image/*"
                 onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">অথবা লোগো URL</label>
-              <input
-                type="text"
-                value={logoUrl}
-                onChange={(e) => setLogoUrl(e.target.value)}
-                placeholder="https://..."
-                className="w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
-              />
-            </div>
+
           </div>
           <button
             type="submit"
@@ -195,17 +181,11 @@ export const ManagePartners: React.FC = () => {
                     placeholder="ওয়েবসাইট URL"
                   />
                   <input
-                    type="text"
-                    value={editLogoUrl}
-                    onChange={(e) => setEditLogoUrl(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg text-xs border border-slate-300"
-                    placeholder="লোগো URL"
-                  />
-                  <input
                     type="file"
                     accept="image/*"
                     onChange={(e) => setEditLogoFile(e.target.files?.[0] || null)}
                     className="w-full px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg"
+                    title="নতুন লোগো আপলোড করুন (ঐচ্ছিক)"
                   />
                   <div className="flex gap-2">
                     <button

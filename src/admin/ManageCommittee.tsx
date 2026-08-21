@@ -22,7 +22,6 @@ export const ManageCommittee: React.FC = () => {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoUrl, setPhotoUrl] = useState('');
   const [creating, setCreating] = useState(false);
 
   const [editing, setEditing] = useState<CommitteeMember | null>(null);
@@ -33,7 +32,6 @@ export const ManageCommittee: React.FC = () => {
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
-  const [editPhotoUrl, setEditPhotoUrl] = useState('');
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,7 +47,7 @@ export const ManageCommittee: React.FC = () => {
       if (photoFile) {
         formData.append('photo', photoFile);
       } else {
-        formData.append('photo', photoUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80');
+        formData.append('photo', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80');
       }
       const res = await fetch('/api/committee', {
         method: 'POST',
@@ -63,7 +61,6 @@ export const ManageCommittee: React.FC = () => {
       setEmail('');
       setPhone('');
       setPhotoFile(null);
-      setPhotoUrl('');
       refetch();
     } catch (e) {
       alert('ত্রুটি ঘটেছে');
@@ -80,7 +77,6 @@ export const ManageCommittee: React.FC = () => {
     setEditBio(member.bio || '');
     setEditEmail(member.email || '');
     setEditPhone(member.phone || '');
-    setEditPhotoUrl(member.photo || '');
     setEditPhotoFile(null);
   };
 
@@ -96,8 +92,6 @@ export const ManageCommittee: React.FC = () => {
       formData.append('phone', editPhone);
       if (editPhotoFile) {
         formData.append('photo', editPhotoFile);
-      } else if (editPhotoUrl) {
-        formData.append('photo', editPhotoUrl);
       }
       const res = await fetch(`/api/committee/${editing.id}`, {
         method: 'PUT',
@@ -181,18 +175,16 @@ export const ManageCommittee: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">ছবি আপলোড</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">ছবি আপলোড (Direct Upload)</label>
               <input
                 type="file"
+                required
                 accept="image/*"
                 onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">অথবা ছবি URL</label>
-              <input type="text" value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} placeholder="https://..." className={inputCls} />
-            </div>
+
           </div>
 
           <button
@@ -241,7 +233,7 @@ export const ManageCommittee: React.FC = () => {
                   <input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="ইমেইল" />
                   <input type="text" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="ফোন" />
                   <textarea value={editBio} onChange={(e) => setEditBio(e.target.value)} rows={2} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="জীবনী" />
-                  <input type="text" value={editPhotoUrl} onChange={(e) => setEditPhotoUrl(e.target.value)} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="ছবি URL" />
+                  <p className="col-span-2 text-xs text-slate-400">ছবি পরিবর্তনের জন্য নতুন ফাইল আপলোড করুন (ঐচ্ছিক)</p>
                   <input
                     type="file"
                     accept="image/*"

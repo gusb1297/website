@@ -15,18 +15,16 @@ export const ManageGallery: React.FC = () => {
 
   const [albumTitle, setAlbumTitle] = useState('');
   const [albumDescription, setAlbumDescription] = useState('');
-  const [albumCoverUrl, setAlbumCoverUrl] = useState('');
   const [albumCoverFile, setAlbumCoverFile] = useState<File | null>(null);
+  const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
 
   const [editingAlbum, setEditingAlbum] = useState<GalleryAlbum | null>(null);
   const [editAlbumTitle, setEditAlbumTitle] = useState('');
   const [editAlbumDescription, setEditAlbumDescription] = useState('');
-  const [editAlbumCoverUrl, setEditAlbumCoverUrl] = useState('');
 
   // Photo form
   const [caption, setCaption] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoUrl, setPhotoUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const activeAlbum = albums?.find((a) => a.id === selectedAlbumId) || albums?.[0] || null;
@@ -48,8 +46,8 @@ export const ManageGallery: React.FC = () => {
       if (albumDescription) formData.append('description', albumDescription);
       if (albumCoverFile) {
         formData.append('coverImage', albumCoverFile);
-      } else if (albumCoverUrl) {
-        formData.append('coverImage', albumCoverUrl);
+      } else {
+        formData.append('coverImage', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
       }
       const res = await fetch('/api/gallery/albums', {
         method: 'POST',
@@ -59,7 +57,6 @@ export const ManageGallery: React.FC = () => {
       if (!res.ok) throw new Error('অ্যালবাম তৈরি করতে সমস্যা হয়েছে');
       setAlbumTitle('');
       setAlbumDescription('');
-      setAlbumCoverUrl('');
       setAlbumCoverFile(null);
       refetchAlbums();
     } catch (e) {
@@ -71,7 +68,6 @@ export const ManageGallery: React.FC = () => {
     setEditingAlbum(album);
     setEditAlbumTitle(album.title);
     setEditAlbumDescription(album.description || '');
-    setEditAlbumCoverUrl(album.coverImage);
   };
 
   const handleSaveAlbum = async () => {
@@ -80,7 +76,10 @@ export const ManageGallery: React.FC = () => {
       const formData = new FormData();
       formData.append('title', editAlbumTitle);
       formData.append('description', editAlbumDescription);
-      if (editAlbumCoverUrl) formData.append('coverImage', editAlbumCoverUrl);
+      if (albumCoverFile) {
+        // edit cover file handled below
+      }
+      // If editing and no new file, keep existing image (handled by controller spreading old data)
       const res = await fetch(`/api/gallery/albums/${editingAlbum.id}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
@@ -120,7 +119,7 @@ export const ManageGallery: React.FC = () => {
       if (photoFile) {
         formData.append('image', photoFile);
       } else {
-        formData.append('image', photoUrl || 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
+        formData.append('image', 'https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?auto=format&fit=crop&w=800&q=80');
       }
 
       const res = await fetch(`/api/gallery/albums/${activeAlbum.id}/photos`, {
@@ -133,7 +132,6 @@ export const ManageGallery: React.FC = () => {
 
       setCaption('');
       setPhotoFile(null);
-      setPhotoUrl('');
       refetchPhotos();
     } catch (err) {
       alert('ত্রুটি ঘটেছে');
@@ -179,20 +177,15 @@ export const ManageGallery: React.FC = () => {
             placeholder="বর্ণনা (ঐচ্ছিক)"
             className="px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
           />
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={albumCoverUrl}
-              onChange={(e) => setAlbumCoverUrl(e.target.value)}
-              placeholder="কভার URL (ঐচ্ছিক)"
-              className="flex-1 px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300"
-            />
+          <div className="flex gap-2 items-center">
+            <label className="text-xs font-bold text-slate-700">কভার ছবি (Direct Upload):</label>
             <input
               type="file"
+              required
               accept="image/*"
               title="কভার ছবি আপলোড"
               onChange={(e) => setAlbumCoverFile(e.target.files?.[0] || null)}
-              className="w-10"
+              className="flex-1 px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
             />
             <button
               type="submit"
@@ -222,7 +215,7 @@ export const ManageGallery: React.FC = () => {
                 <div className="space-y-2 p-3 rounded-xl bg-white border border-emerald-300">
                   <input type="text" value={editAlbumTitle} onChange={(e) => setEditAlbumTitle(e.target.value)} className="w-full px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="অ্যালবামের নাম" />
                   <input type="text" value={editAlbumDescription} onChange={(e) => setEditAlbumDescription(e.target.value)} className="w-full px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="বর্ণনা" />
-                  <input type="text" value={editAlbumCoverUrl} onChange={(e) => setEditAlbumCoverUrl(e.target.value)} className="w-full px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="কভার ছবি URL" />
+                  <input type="file" accept="image/*" onChange={(e) => setEditCoverFile(e.target.files?.[0] || null)} className="w-full px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" title="নতুন কভার ছবি আপলোড করুন (ঐচ্ছিক)" />
                   <div className="flex gap-2">
                     <button onClick={handleSaveAlbum} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">
                       <Save className="w-3.5 h-3.5" /> সেভ
@@ -281,16 +274,10 @@ export const ManageGallery: React.FC = () => {
             <div className="flex gap-2">
               <input
                 type="file"
+                required
                 accept="image/*"
                 onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
-                className="w-1/2"
-              />
-              <input
-                type="text"
-                value={photoUrl}
-                onChange={(e) => setPhotoUrl(e.target.value)}
-                placeholder="অথবা URL"
-                className="flex-1 px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
+                className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
             </div>
             <button
