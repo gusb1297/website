@@ -89,18 +89,27 @@ export interface Publication {
   thumbnail?: string;
 }
 
+export type GalleryStorage = 'cloudinary' | 'local';
+
 export interface GalleryAlbum {
   id: string;
   title: string;
+  /** Empty for an album created without photos; the UI renders a fallback. */
   coverImage: string;
+  coverPublicId?: string;
+  coverStorage?: GalleryStorage;
   description?: string;
   createdAt: string;
+  /** Calculated by the album API, not persisted as a second source of truth. */
+  photoCount?: number;
 }
 
 export interface GalleryPhoto {
   id: string;
   albumId: string;
   image: string;
+  publicId?: string;
+  storage?: GalleryStorage;
   caption: string;
   uploadedAt: string;
 }

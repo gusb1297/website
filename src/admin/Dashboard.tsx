@@ -129,9 +129,9 @@ export const Dashboard: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-12 xl:gap-8">
           {/* Left Sidebar Navigation */}
-          <div className="lg:col-span-3 space-y-2">
+          <div className="min-w-0 space-y-2 lg:col-span-3">
             <div className="lg:hidden mb-2">
               <button
                 onClick={() => setMobileNavOpen(!mobileNavOpen)}
@@ -166,7 +166,7 @@ export const Dashboard: React.FC = () => {
           </div>
 
           {/* Main Module Content Area */}
-          <div className="lg:col-span-9">
+          <div className="min-w-0 lg:col-span-9">
             {activeTab === 'slides' && <ManageHeroSlider />}
             {activeTab === 'content' && <ManagePages />}
             {activeTab === 'programs' && <ManagePrograms />}

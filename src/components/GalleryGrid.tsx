@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { GalleryAlbum, GalleryPhoto } from '../types';
-import { Image, X, ZoomIn, Eye } from 'lucide-react';
+import { SafeImage } from './SafeImage';
+import { ImageOff, X, ZoomIn } from 'lucide-react';
 
 interface GalleryGridProps {
   albums: GalleryAlbum[];
@@ -16,16 +17,34 @@ export const GalleryGrid: React.FC<GalleryGridProps> = ({ albums, photos }) => {
       ? photos
       : photos.filter((p) => p.albumId === selectedAlbumId);
 
+  useEffect(() => {
+    if (selectedAlbumId !== 'all' && !albums.some((album) => album.id === selectedAlbumId)) {
+      setSelectedAlbumId('all');
+    }
+  }, [albums, selectedAlbumId]);
+
+  useEffect(() => {
+    if (!activePhoto) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActivePhoto(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [activePhoto]);
+
   return (
     <div className="space-y-8">
       {/* Album Filter Tabs */}
-      <div className="flex flex-wrap items-center justify-center gap-2">
+      <div className="flex max-w-full flex-wrap items-center justify-center gap-2" role="tablist" aria-label="ফটো অ্যালবাম">
         <button
+          type="button"
+          role="tab"
+          aria-selected={selectedAlbumId === 'all'}
           onClick={() => setSelectedAlbumId('all')}
-          className={`px-4 py-2 rounded-full text-xs font-semibold transition-all ${
+          className={`max-w-full rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
             selectedAlbumId === 'all'
-              ? 'bg-amber-500 text-slate-950 shadow-md scale-105'
-              : 'bg-emerald-900/40 text-emerald-100 hover:bg-emerald-900'
+              ? 'border-amber-500 bg-amber-500 text-slate-950 shadow-md'
+              : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-700 hover:text-emerald-950'
           }`}
         >
           সব অ্যালবামের ছবি ({photos.length})
@@ -34,14 +53,17 @@ export const GalleryGrid: React.FC<GalleryGridProps> = ({ albums, photos }) => {
         {albums.map((album) => (
           <button
             key={album.id}
+            type="button"
+            role="tab"
+            aria-selected={selectedAlbumId === album.id}
             onClick={() => setSelectedAlbumId(album.id)}
-            className={`px-4 py-2 rounded-full text-xs font-semibold transition-all ${
+            className={`max-w-full truncate rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
               selectedAlbumId === album.id
-                ? 'bg-amber-500 text-slate-950 shadow-md scale-105'
-                : 'bg-emerald-900/40 text-emerald-100 hover:bg-emerald-900'
+                ? 'border-amber-500 bg-amber-500 text-slate-950 shadow-md'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-emerald-700 hover:text-emerald-950'
             }`}
           >
-            {album.title}
+            {album.title} ({album.photoCount ?? photos.filter((photo) => photo.albumId === album.id).length})
           </button>
         ))}
       </div>
@@ -54,10 +76,11 @@ export const GalleryGrid: React.FC<GalleryGridProps> = ({ albums, photos }) => {
             onClick={() => setActivePhoto(photo)}
             className="break-inside-avoid relative rounded-2xl overflow-hidden group cursor-pointer border border-slate-200 shadow-md hover:shadow-2xl transition-all"
           >
-            <img
+            <SafeImage
               src={photo.image}
-              alt={photo.caption}
-              className="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-500"
+              alt={photo.caption || 'গ্যালারির ছবি'}
+              className="min-h-48 w-full object-cover transition-transform duration-500 group-hover:scale-105"
+              fallbackClassName="h-56"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 text-white">
               <p className="text-xs font-medium leading-snug text-amber-300">{photo.caption}</p>
@@ -70,8 +93,11 @@ export const GalleryGrid: React.FC<GalleryGridProps> = ({ albums, photos }) => {
       </div>
 
       {filteredPhotos.length === 0 && (
-        <div className="text-center py-12 text-slate-500 font-serif">
-          <p>এই অ্যালবামে এখনও কোনো ছবি আপলোড করা হয়নি।</p>
+        <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white py-14 text-center text-slate-500">
+          <ImageOff className="mx-auto h-9 w-9 text-slate-300" />
+          <p className="mt-3 font-serif text-sm font-bold">
+            {albums.length === 0 ? 'এখনও কোনো ফটো অ্যালবাম প্রকাশ করা হয়নি।' : 'এই অ্যালবামে এখনও কোনো ছবি নেই।'}
+          </p>
         </div>
       )}
 
@@ -93,10 +119,11 @@ export const GalleryGrid: React.FC<GalleryGridProps> = ({ albums, photos }) => {
             </button>
 
             <div className="max-h-[75vh] overflow-hidden bg-black flex items-center justify-center">
-              <img
+              <SafeImage
                 src={activePhoto.image}
-                alt={activePhoto.caption}
+                alt={activePhoto.caption || 'গ্যালারির ছবি'}
                 className="max-h-[75vh] w-auto object-contain"
+                fallbackClassName="h-72 w-full"
               />
             </div>
 

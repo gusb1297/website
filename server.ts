@@ -2,6 +2,7 @@
 // see the credentials on first use.
 import 'dotenv/config';
 import express from 'express';
+import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import apiRouter from './server/routes/api';
@@ -35,13 +36,35 @@ function notFoundHandler(req: express.Request, res: express.Response) {
 
 function errorHandler(err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) {
   console.error('[server] Unhandled error:', err);
-  const status = (err as { status?: number }).status || 500;
-  const message = (err as { message?: string }).message || 'Internal server error';
-  if (status < 500) {
-    res.status(status).json({ error: message });
-  } else {
-    res.status(500).json({ error: 'Internal server error' });
+
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        error: 'file_too_large',
+        message: 'ফাইলটি নির্ধারিত সীমার চেয়ে বড়। ছোট আকারের ফাইল নির্বাচন করুন।',
+      });
+    }
+    if (err.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({
+        error: 'too_many_files',
+        message: 'একবারে অনুমোদিত সংখ্যার চেয়ে বেশি ফাইল নির্বাচন করা হয়েছে।',
+      });
+    }
+    return res.status(400).json({
+      error: 'invalid_upload',
+      message: 'ফাইল আপলোডের তথ্য সঠিক নয়। ফাইলগুলো আবার নির্বাচন করুন।',
+    });
   }
+
+  const status = (err as { status?: number }).status || 500;
+  const rawMessage = (err as { message?: string }).message || 'Internal server error';
+  if (status < 500) {
+    const message = rawMessage.startsWith('invalid_image_type:')
+      ? 'শুধু JPG, JPEG, PNG, WEBP অথবা GIF ছবি আপলোড করা যাবে।'
+      : rawMessage;
+    return res.status(status).json({ error: 'invalid_upload', message });
+  }
+  res.status(500).json({ error: 'Internal server error', message: 'সার্ভারে সমস্যা হয়েছে। আবার চেষ্টা করুন।' });
 }
 
 async function startServer() {

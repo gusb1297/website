@@ -6,9 +6,9 @@ import { VideoPlayer } from '../components/VideoPlayer';
 import { Image as ImageIcon, Video as VideoIcon } from 'lucide-react';
 
 export const Gallery: React.FC = () => {
-  const { data: albums } = useFetch<GalleryAlbum[]>('/api/gallery/albums');
+  const { data: albums, loading: albumsLoading, error: albumsError, refetch: refetchAlbums } = useFetch<GalleryAlbum[]>('/api/gallery/albums');
   // The grid itself filters per album; load all photos once so every tab works.
-  const { data: photos } = useFetch<GalleryPhoto[]>('/api/gallery/photos');
+  const { data: photos, loading: photosLoading, error: photosError, refetch: refetchPhotos } = useFetch<GalleryPhoto[]>('/api/gallery/photos');
   const { data: videos } = useFetch<VideoItem[]>('/api/videos');
 
   const [mainTab, setMainTab] = useState<'photos' | 'videos'>('photos');
@@ -58,7 +58,27 @@ export const Gallery: React.FC = () => {
 
         {/* Tab 1: Photos */}
         {mainTab === 'photos' && (
-          <GalleryGrid albums={albums || []} photos={photos || []} />
+          albumsLoading || photosLoading ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="গ্যালারি লোড হচ্ছে">
+              {[0, 1, 2, 3].map((item) => <div key={item} className="h-64 animate-pulse rounded-2xl bg-slate-200" />)}
+            </div>
+          ) : albumsError || photosError ? (
+            <div className="rounded-2xl border border-red-200 bg-white px-4 py-14 text-center">
+              <p className="text-sm font-bold text-red-700">ফটো গ্যালারি লোড করা যায়নি।</p>
+              <button
+                type="button"
+                onClick={() => {
+                  refetchAlbums();
+                  refetchPhotos();
+                }}
+                className="mt-3 rounded-xl bg-emerald-950 px-5 py-2.5 text-xs font-bold text-amber-400"
+              >
+                আবার চেষ্টা করুন
+              </button>
+            </div>
+          ) : (
+            <GalleryGrid albums={albums || []} photos={photos || []} />
+          )
         )}
 
         {/* Tab 2: Videos */}

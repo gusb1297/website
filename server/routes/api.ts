@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { upload } from '../config/multer';
+import { galleryUpload, MAX_GALLERY_FILES, upload } from '../config/multer';
 import { authenticateJwt, requireAdmin } from '../middleware/auth';
 import { createRateLimit } from '../middleware/rateLimit';
 
@@ -148,14 +148,31 @@ router.post(
 router.put('/publications/:id', authenticateJwt, upload.single('pdfFile'), updatePublication);
 router.delete('/publications/:id', authenticateJwt, deletePublication);
 
-// Gallery
+// Gallery — strict image-only multipart handling. The legacy `coverImage` and
+// `image` field names remain accepted while the current UI can send batches.
 router.get('/gallery/albums', getAlbums);
-router.post('/gallery/albums', authenticateJwt, upload.single('coverImage'), createAlbum);
-router.put('/gallery/albums/:id', authenticateJwt, upload.single('coverImage'), updateAlbum);
+router.post(
+  '/gallery/albums',
+  authenticateJwt,
+  galleryUpload.fields([
+    { name: 'coverImage', maxCount: 1 },
+    { name: 'photos', maxCount: MAX_GALLERY_FILES },
+  ]),
+  createAlbum
+);
+router.put('/gallery/albums/:id', authenticateJwt, galleryUpload.single('coverImage'), updateAlbum);
 router.delete('/gallery/albums/:id', authenticateJwt, deleteAlbum);
 router.get('/gallery/albums/:id/photos', getAlbumPhotos);
 router.get('/gallery/photos', getAllPhotos);
-router.post('/gallery/albums/:id/photos', authenticateJwt, upload.single('image'), addPhoto);
+router.post(
+  '/gallery/albums/:id/photos',
+  authenticateJwt,
+  galleryUpload.fields([
+    { name: 'image', maxCount: MAX_GALLERY_FILES },
+    { name: 'images', maxCount: MAX_GALLERY_FILES },
+  ]),
+  addPhoto
+);
 router.put('/gallery/photos/:id', authenticateJwt, updatePhoto);
 router.delete('/gallery/photos/:id', authenticateJwt, deletePhoto);
 
