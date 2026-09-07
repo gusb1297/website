@@ -22,7 +22,7 @@ admin panel without touching code.
   with a live progress bar; stored on **Cloudinary** when configured, local disk otherwise) or
   ② *YouTube / Vimeo link* (paste any watch / share / shorts / live / embed URL — it is normalised to a
   real embed URL and the thumbnail is fetched automatically). Titles/categories are editable inline.
-- **Photo Gallery** – albums (add / edit / delete) and per-album photos (upload / delete).
+- **Photo Gallery** – albums (add / edit / delete), optional photos during album creation, multi-image upload with previews/progress, and per-album photo management.
 - **Governance / Committee** – add / edit / delete members across all committees.
 - **Partners & Donors** – add / edit / delete.
 - **Stats Counters** – add / edit / delete the animated numbers.
@@ -208,7 +208,8 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 | `BOOTSTRAP_ADMIN_NAME` | no | Display name of the first admin |
 | `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET` | no | Use Cloudinary for uploads (incl. video) instead of local disk |
 | `CLOUDINARY_URL` | no | Alternative single-string Cloudinary credential |
-| `MAX_UPLOAD_MB` | no (default 512) | Maximum size of a single uploaded file |
+| `MAX_UPLOAD_MB` | no (default 512) | Maximum size of a single general upload |
+| `MAX_IMAGE_UPLOAD_MB` | no (default 10) | Maximum size of each Photo Gallery image |
 
 ## 📄 API overview (all under `/api`)
 
@@ -250,3 +251,11 @@ Without credentials everything keeps working on local disk with HTTP-range strea
 | `GET` | `/api/videos/stream/:id` | Range-enabled streaming (redirects to Cloudinary when remote) |
 
 Legacy `POST /api/videos/upload` and `POST /api/videos/embed` still work.
+
+## 🖼️ Photo Gallery uploads
+
+Gallery writes require a valid admin/editor JWT. `POST /api/gallery/albums` accepts `title`, optional
+`description`, and up to 20 multipart `photos` (an album can also be created without a photo). The
+first photo becomes the cover. Add more images with `POST /api/gallery/albums/:id/photos` using the
+multipart `images` field. JPG/JPEG, PNG, WEBP and GIF are accepted; MIME, extension, byte signature,
+and the `MAX_IMAGE_UPLOAD_MB` per-file limit are all enforced by the server.

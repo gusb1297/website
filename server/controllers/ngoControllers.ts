@@ -2,9 +2,18 @@ import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import path from 'path';
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 import { processVideoFile, probeVideoDuration } from '../config/ffmpeg';
 import { uploadToCloudinary, storeFile, destroyCloudinaryAsset } from '../config/cloudinary';
+import { MAX_GALLERY_FILES } from '../config/multer';
 import { parseVideoLink, formatDuration } from '../utils/videoSources';
+import {
+  hasValidImageSignature,
+  removeGalleryImage,
+  removeUploadedFiles,
+  storeGalleryImage,
+  uploadedFiles,
+} from '../utils/galleryImages';
 import { persistStore } from '../config/persistence';
 import { getJwtSecret } from '../config/env';
 import { AdminServiceError, getAuthStatus, setupFirstAdmin, verifyCredentials } from '../services/adminService';
@@ -766,102 +775,292 @@ export const deletePublication = (req: Request, res: Response) => {
 };
 
 // 8. GALLERY (Albums & Photos)
-export const getAlbums = (req: Request, res: Response) => {
-  res.json(memoryStore.galleryAlbums);
+const galleryAlbumResponse = (album: GalleryAlbum): GalleryAlbum => ({
+  ...album,
+  photoCount: memoryStore.galleryPhotos.filter((photo) => photo.albumId === album.id).length,
+});
+
+const cleanGalleryText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+const rejectGalleryText = (
+  res: Response,
+  values: { title?: string; description?: string; caption?: string }
+): boolean => {
+  if (values.title !== undefined && !values.title) {
+    res.status(400).json({ error: 'missing_title', message: 'অ্যালবামের নাম লিখুন।' });
+    return true;
+  }
+  if ((values.title?.length || 0) > 120) {
+    res.status(400).json({ error: 'title_too_long', message: 'অ্যালবামের নাম ১২০ অক্ষরের মধ্যে রাখুন।' });
+    return true;
+  }
+  if ((values.description?.length || 0) > 500) {
+    res.status(400).json({ error: 'description_too_long', message: 'বর্ণনা ৫০০ অক্ষরের মধ্যে রাখুন।' });
+    return true;
+  }
+  if ((values.caption?.length || 0) > 300) {
+    res.status(400).json({ error: 'caption_too_long', message: 'ক্যাপশন ৩০০ অক্ষরের মধ্যে রাখুন।' });
+    return true;
+  }
+  return false;
+};
+
+const uniqueGalleryId = (prefix: 'alb' | 'p') => `${prefix}-${Date.now()}-${randomUUID().slice(0, 8)}`;
+
+export const getAlbums = (_req: Request, res: Response) => {
+  // Counts are derived so they can never drift from photo records.
+  res.json(memoryStore.galleryAlbums.map(galleryAlbumResponse));
 };
 
 export const createAlbum = async (req: Request, res: Response) => {
-  let coverImage = req.body.coverImage;
-  if (req.file) {
-    coverImage = await uploadToCloudinary(req.file.path, 'vdo_bogura/gallery');
+  const filesByField = (req.files || {}) as Record<string, Express.Multer.File[]>;
+  const allFiles = uploadedFiles(req.files as Record<string, Express.Multer.File[]> | undefined);
+  const title = cleanGalleryText(req.body.title);
+  const description = cleanGalleryText(req.body.description);
+  const caption = cleanGalleryText(req.body.caption);
+
+  if (rejectGalleryText(res, { title, description, caption })) {
+    removeUploadedFiles(allFiles);
+    return;
   }
-  if (!requireFields(res, { title: req.body.title, coverImage })) return;
+  if (allFiles.some((file) => !hasValidImageSignature(file))) {
+    removeUploadedFiles(allFiles);
+    return res.status(400).json({
+      error: 'invalid_image_content',
+      message: 'একটি বা একাধিক ফাইল সঠিক ইমেজ নয়। JPG, PNG, WEBP অথবা GIF ছবি দিন।',
+    });
+  }
+
+  // `coverImage` remains supported for older admin builds. The current UI
+  // sends initial album photos as `photos` and the first photo becomes cover.
+  const explicitCoverFile = filesByField.coverImage?.[0] || req.file;
+  const photoFiles = filesByField.photos || [];
+  const [storedCover, storedPhotos] = await Promise.all([
+    explicitCoverFile ? storeGalleryImage(explicitCoverFile) : Promise.resolve(null),
+    Promise.all(photoFiles.map(storeGalleryImage)),
+  ]);
+  const cover = storedCover || storedPhotos[0] || null;
 
   const newAlbum: GalleryAlbum = {
-    id: 'alb-' + Date.now(),
-    title: req.body.title,
-    coverImage,
-    description: req.body.description,
+    id: uniqueGalleryId('alb'),
+    title,
+    coverImage: cover?.url || '',
+    coverPublicId: cover?.publicId,
+    coverStorage: cover?.storage,
+    description,
     createdAt: new Date().toISOString(),
   };
+
+  const createdPhotos: GalleryPhoto[] = storedPhotos.map((stored, index) => ({
+    id: uniqueGalleryId('p'),
+    albumId: newAlbum.id,
+    image: stored.url,
+    publicId: stored.publicId,
+    storage: stored.storage,
+    caption: caption || (storedPhotos.length > 1 ? `${title} — ${index + 1}` : title),
+    uploadedAt: new Date().toISOString(),
+  }));
+
+  // Album + initial photos are committed together, preventing orphan records.
   memoryStore.galleryAlbums.unshift(newAlbum);
+  memoryStore.galleryPhotos.push(...createdPhotos);
   persistStore();
-  res.status(201).json(newAlbum);
+  res.status(201).json({ ...galleryAlbumResponse(newAlbum), photos: createdPhotos });
 };
 
 export const updateAlbum = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const index = memoryStore.galleryAlbums.findIndex((a) => a.id === id);
-  if (index === -1) return res.status(404).json({ error: 'Album not found' });
-
-  if (req.file) {
-    req.body.coverImage = await uploadToCloudinary(req.file.path, 'vdo_bogura/gallery');
+  const index = memoryStore.galleryAlbums.findIndex((album) => album.id === id);
+  if (index === -1) {
+    if (req.file) removeUploadedFiles([req.file]);
+    return res.status(404).json({ error: 'album_not_found', message: 'অ্যালবামটি পাওয়া যায়নি।' });
   }
 
-  memoryStore.galleryAlbums[index] = {
-    ...memoryStore.galleryAlbums[index],
-    ...req.body,
+  const title = cleanGalleryText(req.body.title);
+  const description = cleanGalleryText(req.body.description);
+  if (rejectGalleryText(res, { title, description })) {
+    if (req.file) removeUploadedFiles([req.file]);
+    return;
+  }
+  if (req.file && !hasValidImageSignature(req.file)) {
+    removeUploadedFiles([req.file]);
+    return res.status(400).json({ error: 'invalid_image_content', message: 'নির্বাচিত ফাইলটি সঠিক ইমেজ নয়।' });
+  }
+
+  const oldAlbum = memoryStore.galleryAlbums[index];
+  const storedCover = req.file ? await storeGalleryImage(req.file) : null;
+  const updatedAlbum: GalleryAlbum = {
+    ...oldAlbum,
+    title,
+    description,
+    ...(storedCover
+      ? {
+          coverImage: storedCover.url,
+          coverPublicId: storedCover.publicId,
+          coverStorage: storedCover.storage,
+        }
+      : {}),
     id,
   };
+
+  memoryStore.galleryAlbums[index] = updatedAlbum;
   persistStore();
-  res.json(memoryStore.galleryAlbums[index]);
+
+  // Do not remove a previous cover that is also one of the album's photos.
+  if (
+    storedCover &&
+    oldAlbum.coverImage &&
+    oldAlbum.coverImage !== storedCover.url &&
+    !memoryStore.galleryPhotos.some((photo) => photo.image === oldAlbum.coverImage)
+  ) {
+    await removeGalleryImage({
+      image: oldAlbum.coverImage,
+      publicId: oldAlbum.coverPublicId,
+      storage: oldAlbum.coverStorage,
+    });
+  }
+
+  res.json(galleryAlbumResponse(updatedAlbum));
 };
 
-export const deleteAlbum = (req: Request, res: Response) => {
+export const deleteAlbum = async (req: Request, res: Response) => {
   const { id } = req.params;
-  memoryStore.galleryAlbums = memoryStore.galleryAlbums.filter((a) => a.id !== id);
-  memoryStore.galleryPhotos = memoryStore.galleryPhotos.filter((p) => p.albumId !== id);
+  const album = memoryStore.galleryAlbums.find((item) => item.id === id);
+  if (!album) return res.status(404).json({ error: 'album_not_found', message: 'অ্যালবামটি পাওয়া যায়নি।' });
+
+  const albumPhotos = memoryStore.galleryPhotos.filter((photo) => photo.albumId === id);
+  memoryStore.galleryAlbums = memoryStore.galleryAlbums.filter((item) => item.id !== id);
+  memoryStore.galleryPhotos = memoryStore.galleryPhotos.filter((photo) => photo.albumId !== id);
   persistStore();
+
+  // Remove each unique physical file once. A legacy URL still referenced by
+  // another album/photo is deliberately retained.
+  const uniqueAssets = new Map<string, { image: string; publicId?: string; storage?: 'cloudinary' | 'local' }>();
+  uniqueAssets.set(album.coverImage, {
+    image: album.coverImage,
+    publicId: album.coverPublicId,
+    storage: album.coverStorage,
+  });
+  albumPhotos.forEach((photo) => {
+    uniqueAssets.set(photo.image, { image: photo.image, publicId: photo.publicId, storage: photo.storage });
+  });
+  await Promise.all(
+    [...uniqueAssets.values()]
+      .filter(
+        (asset) =>
+          asset.image &&
+          !memoryStore.galleryAlbums.some((item) => item.coverImage === asset.image) &&
+          !memoryStore.galleryPhotos.some((photo) => photo.image === asset.image)
+      )
+      .map(removeGalleryImage)
+  );
+
   res.json({ message: 'Album and its photos deleted' });
 };
 
 export const getAlbumPhotos = (req: Request, res: Response) => {
   const { id } = req.params;
-  const photos = memoryStore.galleryPhotos.filter((p) => p.albumId === id);
-  res.json(photos);
+  if (!memoryStore.galleryAlbums.some((album) => album.id === id)) {
+    return res.status(404).json({ error: 'album_not_found', message: 'অ্যালবামটি পাওয়া যায়নি।' });
+  }
+  res.json(memoryStore.galleryPhotos.filter((photo) => photo.albumId === id));
 };
 
-export const getAllPhotos = (req: Request, res: Response) => {
+export const getAllPhotos = (_req: Request, res: Response) => {
   res.json(memoryStore.galleryPhotos);
 };
 
 export const addPhoto = async (req: Request, res: Response) => {
-  let image = req.body.image;
-  if (req.file) {
-    image = await uploadToCloudinary(req.file.path, 'vdo_bogura/gallery');
-  }
-  if (!requireFields(res, { albumId: req.body.albumId, image })) return;
+  const albumId = req.params.id;
+  const files = uploadedFiles(req.files as Record<string, Express.Multer.File[]> | Express.Multer.File[] | undefined);
+  const albumIndex = memoryStore.galleryAlbums.findIndex((album) => album.id === albumId);
+  const caption = cleanGalleryText(req.body.caption);
 
-  const newPhoto: GalleryPhoto = {
-    id: 'p-' + Date.now(),
-    albumId: req.body.albumId,
-    image,
-    caption: req.body.caption || '',
+  if (albumIndex === -1) {
+    removeUploadedFiles(files);
+    return res.status(404).json({ error: 'album_not_found', message: 'অ্যালবামটি পাওয়া যায়নি।' });
+  }
+  if (rejectGalleryText(res, { caption })) {
+    removeUploadedFiles(files);
+    return;
+  }
+  if (files.length === 0) {
+    return res.status(400).json({ error: 'no_images', message: 'আপলোড করার জন্য অন্তত একটি ছবি নির্বাচন করুন।' });
+  }
+  if (files.length > MAX_GALLERY_FILES) {
+    removeUploadedFiles(files);
+    return res.status(400).json({
+      error: 'too_many_images',
+      message: `একবারে সর্বোচ্চ ${MAX_GALLERY_FILES}টি ছবি আপলোড করা যাবে।`,
+    });
+  }
+  if (files.some((file) => !hasValidImageSignature(file))) {
+    removeUploadedFiles(files);
+    return res.status(400).json({
+      error: 'invalid_image_content',
+      message: 'একটি বা একাধিক ফাইল সঠিক ইমেজ নয়। JPG, PNG, WEBP অথবা GIF ছবি দিন।',
+    });
+  }
+
+  const storedImages = await Promise.all(files.map(storeGalleryImage));
+  const createdPhotos: GalleryPhoto[] = storedImages.map((stored, index) => ({
+    id: uniqueGalleryId('p'),
+    albumId,
+    image: stored.url,
+    publicId: stored.publicId,
+    storage: stored.storage,
+    caption: caption || (storedImages.length > 1 ? `${memoryStore.galleryAlbums[albumIndex].title} — ${index + 1}` : ''),
     uploadedAt: new Date().toISOString(),
-  };
-  memoryStore.galleryPhotos.push(newPhoto);
+  }));
+
+  memoryStore.galleryPhotos.push(...createdPhotos);
+  const album = memoryStore.galleryAlbums[albumIndex];
+  if (!album.coverImage) {
+    memoryStore.galleryAlbums[albumIndex] = {
+      ...album,
+      coverImage: createdPhotos[0].image,
+      coverPublicId: createdPhotos[0].publicId,
+      coverStorage: createdPhotos[0].storage,
+    };
+  }
   persistStore();
-  res.status(201).json(newPhoto);
+  res.status(201).json(createdPhotos.length === 1 ? createdPhotos[0] : createdPhotos);
 };
 
 export const updatePhoto = (req: Request, res: Response) => {
   const { id } = req.params;
-  const index = memoryStore.galleryPhotos.findIndex((p) => p.id === id);
-  if (index === -1) return res.status(404).json({ error: 'Photo not found' });
+  const index = memoryStore.galleryPhotos.findIndex((photo) => photo.id === id);
+  if (index === -1) return res.status(404).json({ error: 'photo_not_found', message: 'ছবিটি পাওয়া যায়নি।' });
 
-  memoryStore.galleryPhotos[index] = {
-    ...memoryStore.galleryPhotos[index],
-    ...req.body,
-    id,
-  };
+  const caption = cleanGalleryText(req.body.caption);
+  if (rejectGalleryText(res, { caption })) return;
+  memoryStore.galleryPhotos[index] = { ...memoryStore.galleryPhotos[index], caption, id };
   persistStore();
   res.json(memoryStore.galleryPhotos[index]);
 };
 
-export const deletePhoto = (req: Request, res: Response) => {
+export const deletePhoto = async (req: Request, res: Response) => {
   const { id } = req.params;
-  memoryStore.galleryPhotos = memoryStore.galleryPhotos.filter((p) => p.id !== id);
+  const photo = memoryStore.galleryPhotos.find((item) => item.id === id);
+  if (!photo) return res.status(404).json({ error: 'photo_not_found', message: 'ছবিটি পাওয়া যায়নি।' });
+
+  memoryStore.galleryPhotos = memoryStore.galleryPhotos.filter((item) => item.id !== id);
+  const albumIndex = memoryStore.galleryAlbums.findIndex((album) => album.id === photo.albumId);
+  if (albumIndex !== -1 && memoryStore.galleryAlbums[albumIndex].coverImage === photo.image) {
+    const nextPhoto = memoryStore.galleryPhotos.find((item) => item.albumId === photo.albumId);
+    memoryStore.galleryAlbums[albumIndex] = {
+      ...memoryStore.galleryAlbums[albumIndex],
+      coverImage: nextPhoto?.image || '',
+      coverPublicId: nextPhoto?.publicId,
+      coverStorage: nextPhoto?.storage,
+    };
+  }
   persistStore();
+
+  const stillReferenced =
+    memoryStore.galleryPhotos.some((item) => item.image === photo.image) ||
+    memoryStore.galleryAlbums.some((album) => album.coverImage === photo.image);
+  if (!stillReferenced) await removeGalleryImage(photo);
   res.json({ message: 'Photo deleted' });
 };
 

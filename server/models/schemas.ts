@@ -81,16 +81,24 @@ const PublicationSchema = new Schema({
 });
 
 const GalleryAlbumSchema = new Schema({
-  title: { type: String, required: true },
-  coverImage: { type: String, required: true },
-  description: String,
+  title: { type: String, required: true, trim: true, maxlength: 120 },
+  // Albums may intentionally be created before their first photo is ready.
+  coverImage: { type: String, default: '' },
+  coverPublicId: String,
+  coverStorage: { type: String, enum: ['cloudinary', 'local'] },
+  description: { type: String, maxlength: 500 },
   createdAt: { type: Date, default: Date.now },
 });
 
 const GalleryPhotoSchema = new Schema({
-  albumId: { type: Schema.Types.ObjectId, ref: 'GalleryAlbum', required: true },
+  // Content currently uses stable `alb-*` ids in the persisted JSON store, not
+  // Mongo ObjectIds. Keeping the schema aligned prevents an invalid cast if
+  // gallery content is moved to these existing models in the future.
+  albumId: { type: String, required: true, index: true },
   image: { type: String, required: true },
-  caption: String,
+  publicId: String,
+  storage: { type: String, enum: ['cloudinary', 'local'] },
+  caption: { type: String, maxlength: 300 },
   uploadedAt: { type: Date, default: Date.now },
 });
 
