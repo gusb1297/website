@@ -16,6 +16,7 @@ import { ManagePages } from './ManagePages';
 import { ManageSettings } from './ManageSettings';
 import { ManageAdmins } from './ManageAdmins';
 import { StorageStatusBanner } from './StorageStatusBanner';
+import { AdminMobileNav } from './AdminMobileNav';
 import {
   Sliders,
   Sprout,
@@ -55,7 +56,6 @@ export const Dashboard: React.FC = () => {
   const { user, logout, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>('slides');
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   if (!isAuthenticated) {
     return (
@@ -98,7 +98,7 @@ export const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#faf8f5]">
+    <div className="admin-dashboard min-h-screen bg-[#faf8f5]">
       {/* Top Header Bar */}
       <div className="bg-emerald-950 text-white py-6 px-4 border-b-4 border-amber-500">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -134,18 +134,9 @@ export const Dashboard: React.FC = () => {
         <StorageStatusBanner />
 
         <div className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-12 xl:gap-8">
-          {/* Left Sidebar Navigation */}
-          <div className="min-w-0 space-y-2 lg:col-span-3">
-            <div className="lg:hidden mb-2">
-              <button
-                onClick={() => setMobileNavOpen(!mobileNavOpen)}
-                className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-emerald-950 text-amber-400 font-bold text-xs shadow-md"
-              >
-                <span>মেনু</span>
-                <span className="text-sm">{mobileNavOpen ? '▲' : '▼'}</span>
-              </button>
-            </div>
-            <div className={`${mobileNavOpen ? 'block' : 'hidden'} lg:block bg-white p-3 rounded-2xl border border-slate-200 shadow-md space-y-1`}>
+          {/* Desktop sidebar; phones use the admin-only bottom navigation. */}
+          <div className="hidden min-w-0 space-y-2 lg:col-span-3 lg:block">
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-md space-y-1">
               <p className="px-4 pt-1 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                 কন্টেন্ট ম্যানেজমেন্ট
               </p>
@@ -154,7 +145,6 @@ export const Dashboard: React.FC = () => {
                   key={item.id}
                   onClick={() => {
                     setActiveTab(item.id);
-                    if (window.innerWidth < 1024) setMobileNavOpen(false);
                   }}
                   className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-bold transition-all text-left ${
                     activeTab === item.id
@@ -188,6 +178,11 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
+      <AdminMobileNav
+        items={navItems}
+        activeId={activeTab}
+        onSelect={(id) => setActiveTab(id as TabId)}
+      />
     </div>
   );
 };
