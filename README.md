@@ -15,6 +15,7 @@ admin panel without touching code.
 - Animated stats counters, hero slider, video player, PDF viewer.
 
 ### Admin panel (`/admin`)
+- **Admin-only mobile navigation** — fixed bottom tabs on phones, with remaining sections under “আরও”; desktop keeps its sidebar. The public website retains its original hamburger menu and has no bottom navigation.
 - **Hero Slider** – add / edit / reorder / toggle / delete.
 - **Website Content** – edit *all* Home & About page copy (bilingual fields), leader bios, legal items.
 - **Programs, News, Publications, Notices, Careers** – full create / edit / delete.
