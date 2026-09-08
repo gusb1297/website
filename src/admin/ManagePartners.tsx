@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { Partner } from '../types';
 import { Handshake, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 export const ManagePartners: React.FC = () => {
   const { token } = useAuth();
@@ -34,13 +35,13 @@ export const ManagePartners: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (!res.ok) throw new Error('পার্টনার যোগ করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'পার্টনার যোগ করা যায়নি'));
       setName('');
       setWebsiteUrl('');
       setLogoFile(null);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     } finally {
       setCreating(false);
     }
@@ -67,11 +68,11 @@ export const ManagePartners: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (!res.ok) throw new Error('পার্টনার আপডেট করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'পার্টনার আপডেট করা যায়নি'));
       setEditing(null);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     }
   };
 

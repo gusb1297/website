@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { Publication } from '../types';
 import { BookOpen, Trash2, FileText, Edit3, X, Save } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 export const ManagePublications: React.FC = () => {
   const { token } = useAuth();
@@ -40,13 +41,13 @@ export const ManagePublications: React.FC = () => {
         body: formData,
       });
 
-      if (!res.ok) throw new Error('পাবলিকেশন সেভ করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'পাবলিকেশন সেভ করা যায়নি'));
 
       setTitle('');
       setPdfFile(null);
         refetch();
     } catch (err) {
-      alert('ত্রুটি ঘটেছে');
+      alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
     } finally {
       setSubmitting(false);
     }
@@ -72,11 +73,11 @@ export const ManagePublications: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (!res.ok) throw new Error('পাবলিকেশন আপডেট করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'পাবলিকেশন আপডেট করা যায়নি'));
       setEditing(null);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     }
   };
 

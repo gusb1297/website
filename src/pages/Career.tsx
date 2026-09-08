@@ -56,7 +56,14 @@ export const Career: React.FC = () => {
 
       const json = await res.json();
       if (!res.ok) {
-        throw new Error(json.error || 'আবেদন জমা দিতে ব্যর্থ হয়েছে');
+        // Public visitors should not see infrastructure details — keep the
+        // storage-refusal explanation for the admin, show a short message here.
+        const technical = typeof json.error === 'string' && /^[a-z0-9_]+$/i.test(json.error);
+        throw new Error(
+          res.status === 503
+            ? 'সিভি আপলোড এই মুহূর্তে সম্ভব হচ্ছে না। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন অথবা ইমেইলে সিভি পাঠান।'
+            : (!technical && json.error) || json.message || 'আবেদন জমা দিতে ব্যর্থ হয়েছে'
+        );
       }
 
       setSuccessMsg('আপনার আবেদনপত্র ও সিভি সফলভাবে জমা হয়েছে। ধন্যবাদ!');

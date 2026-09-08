@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { CommitteeMember } from '../types';
 import { Users, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 const TYPES = [
   { value: 'executive', label: 'কার্যনির্বাহী পরিষদ (Executive)' },
@@ -54,7 +55,7 @@ export const ManageCommittee: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (!res.ok) throw new Error('সদস্য যোগ করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'সদস্য যোগ করা যায়নি'));
       setName('');
       setDesignation('');
       setBio('');
@@ -63,7 +64,7 @@ export const ManageCommittee: React.FC = () => {
       setPhotoFile(null);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     } finally {
       setCreating(false);
     }
@@ -98,11 +99,11 @@ export const ManageCommittee: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (!res.ok) throw new Error('সদস্য আপডেট করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'সদস্য আপডেট করা যায়নি'));
       setEditing(null);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     }
   };
 

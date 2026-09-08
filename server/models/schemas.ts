@@ -197,6 +197,22 @@ const PageContentSchema = new Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 
+/**
+ * The whole editable site content (hero slides, programs, news, gallery
+ * records, settings, page copy, …) is persisted as ONE document in MongoDB.
+ * Hosts such as Render / Heroku wipe the local disk on every deploy, so a
+ * JSON file on disk is not a safe place for it (see server/config/persistence.ts).
+ */
+const SiteContentSchema = new Schema(
+  {
+    key: { type: String, required: true, unique: true, index: true },
+    version: { type: Number, default: 1 },
+    savedAt: { type: Date, default: Date.now },
+    store: { type: Schema.Types.Mixed, default: {} },
+  },
+  { minimize: false, strict: false }
+);
+
 export const MHeroSlide = mongoose.models.HeroSlide || mongoose.model('HeroSlide', HeroSlideSchema);
 export const MProgram = mongoose.models.Program || mongoose.model('Program', ProgramSchema);
 export const MNews = mongoose.models.News || mongoose.model('News', NewsSchema);
@@ -226,6 +242,17 @@ export const MAdmin: mongoose.Model<AdminDocument> =
   mongoose.model<AdminDocument>('Admin', AdminSchema);
 export const MSiteSettings = mongoose.models.SiteSettings || mongoose.model('SiteSettings', SiteSettingsSchema);
 export const MPageContent = mongoose.models.PageContent || mongoose.model('PageContent', PageContentSchema);
+
+export interface SiteContentDocument extends mongoose.Document {
+  key: string;
+  version: number;
+  savedAt: Date;
+  store: Record<string, unknown>;
+}
+
+export const MSiteContent: mongoose.Model<SiteContentDocument> =
+  (mongoose.models.SiteContent as mongoose.Model<SiteContentDocument>) ||
+  mongoose.model<SiteContentDocument>('SiteContent', SiteContentSchema);
 
 // In-Memory Fallback Memory Store Data
 export const memoryStore = {

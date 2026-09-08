@@ -6,10 +6,16 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import apiRouter from './server/routes/api';
-import { loadStore, flushStore } from './server/config/persistence';
+import {
+  loadStore,
+  flushStore,
+  syncStoreWithDatabase,
+  describePersistenceStatus,
+} from './server/config/persistence';
 import { connectMongo, describeMongoStatus, startMongoReconnectLoop } from './server/config/mongo';
 import { bootstrapAdminFromEnv } from './server/services/adminService';
-import { getJwtSecret } from './server/config/env';
+import { getJwtSecret, isCloudStorageRequired, isEphemeralHost } from './server/config/env';
+import { StorageError, describeStorageStatus, verifyCloudinaryConnection } from './server/config/cloudinary';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -36,6 +42,12 @@ function notFoundHandler(req: express.Request, res: express.Response) {
 
 function errorHandler(err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) {
   console.error('[server] Unhandled error:', err);
+
+  // Upload refused because it could not be stored durably (no Cloudinary on an
+  // ephemeral host, or Cloudinary rejected the file). Tell the admin exactly why.
+  if (err instanceof StorageError) {
+    return res.status(err.status).json({ error: err.code, message: err.message });
+  }
 
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -85,32 +97,77 @@ async function startServer() {
   }
   app.use('/uploads', express.static(uploadsPath, { maxAge: isProduction ? '7d' : 0 }));
 
-  // Load persisted content (admin edits survive restarts)
+  // Warm the in-memory store from the local JSON cache first (instant boot);
+  // MongoDB — the source of truth — is layered on top right after connecting.
   const loaded = loadStore();
   if (loaded) {
-    console.log('Loaded persisted content from data/store.json');
+    console.log('Loaded cached content from data/store.json');
   } else {
-    console.log('No persisted store found - starting with empty content (add it from the admin panel).');
+    console.log('No local content cache found (data/store.json).');
   }
 
   // Fail fast when the JWT signing key is missing in production.
   getJwtSecret();
 
-  // Admin accounts live in MongoDB. Without a connection nobody can sign in to
-  // the admin panel (there are no fallback / demo credentials by design).
+  // Admin accounts AND all site content live in MongoDB. Without a connection
+  // nobody can sign in to the admin panel (there are no fallback / demo
+  // credentials by design) and content edits would only reach the local disk.
   const mongoOk = await connectMongo();
   if (mongoOk) {
+    await syncStoreWithDatabase();
     await bootstrapAdminFromEnv();
+  } else if (isEphemeralHost()) {
+    console.error(
+      '[persistence] WARNING: MongoDB is not connected and this host wipes its disk on every deploy — ' +
+        'admin content will NOT survive the next deploy until MONGODB_URI works.'
+    );
   }
-  startMongoReconnectLoop(() => bootstrapAdminFromEnv());
+  startMongoReconnectLoop(async () => {
+    await syncStoreWithDatabase();
+    await bootstrapAdminFromEnv();
+  });
 
-  // Healthcheck endpoint (before the API router)
+  // File storage: Cloudinary keeps uploads across deploys. Verify the
+  // credentials at boot so a typo shows up here instead of at the first upload.
+  const cloudinaryOk = await verifyCloudinaryConnection();
+  if (!cloudinaryOk) {
+    if (isCloudStorageRequired()) {
+      console.error(
+        '[storage] WARNING: Cloudinary is not configured (or unreachable). Image/PDF/video uploads will be ' +
+          'REFUSED with a clear error, because files written to this server\'s local disk are deleted on every ' +
+          'deploy/restart. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.'
+      );
+    } else {
+      console.warn('[storage] Cloudinary is not configured — uploads are kept on the local disk (development mode).');
+    }
+  }
+
+  // Healthcheck endpoint (before the API router). Also reports whether
+  // uploads and content edits are being stored durably.
   app.get('/api/health', (req, res) => {
     const mongo = describeMongoStatus();
+    const storage = describeStorageStatus();
+    const content = describePersistenceStatus();
     res.json({
       status: 'ok',
       time: new Date().toISOString(),
       mongo: { configured: mongo.configured, connected: mongo.connected, state: mongo.state },
+      storage: {
+        provider: storage.provider,
+        configured: storage.configured,
+        durable: storage.durable,
+        cloudRequired: storage.cloudRequired,
+        ephemeralHost: storage.ephemeralHost,
+        cloudName: storage.cloudName,
+        lastCheck: storage.lastCheck,
+        hint: storage.hint,
+      },
+      content: {
+        source: content.source,
+        durable: content.durable,
+        lastSavedAt: content.lastDbSaveAt,
+        hint: content.hint,
+      },
     });
   });
 
@@ -159,10 +216,16 @@ async function startServer() {
     );
   });
 
-  // Flush pending content changes on shutdown
+  // Flush pending content changes (file cache + MongoDB) on shutdown
+  let shuttingDown = false;
   const shutdown = () => {
-    flushStore();
-    process.exit(0);
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const forceExit = setTimeout(() => process.exit(0), 5000);
+    forceExit.unref();
+    flushStore()
+      .catch((err) => console.error('[persistence] Flush on shutdown failed:', err))
+      .finally(() => process.exit(0));
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

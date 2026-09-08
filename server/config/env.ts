@@ -12,6 +12,44 @@ let cachedJwtSecret: string | null = null;
 
 export const isProduction = () => process.env.NODE_ENV === 'production';
 
+/**
+ * True when the process runs on a PaaS whose local disk is thrown away on
+ * every deploy / restart (Render, Heroku, Railway, Fly.io, Vercel, …).
+ * Anything written to `data/` or `uploads/` on such a host is lost.
+ */
+export function isEphemeralHost(): boolean {
+  return Boolean(
+    process.env.RENDER ||
+      process.env.RENDER_SERVICE_ID ||
+      process.env.DYNO ||
+      process.env.RAILWAY_ENVIRONMENT ||
+      process.env.FLY_APP_NAME ||
+      process.env.VERCEL ||
+      process.env.KOYEB_APP_NAME
+  );
+}
+
+function envFlag(name: string): boolean | undefined {
+  const raw = (process.env[name] || '').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  return undefined;
+}
+
+/**
+ * Whether uploads MUST go to Cloudinary (never to the local disk).
+ *
+ * Defaults to true in production and on known ephemeral hosts, because a file
+ * written to the local disk there silently disappears on the next deploy.
+ * Override with REQUIRE_CLOUD_STORAGE=true|false (e.g. `false` for a VPS that
+ * has a real persistent disk).
+ */
+export function isCloudStorageRequired(): boolean {
+  const flag = envFlag('REQUIRE_CLOUD_STORAGE');
+  if (flag !== undefined) return flag;
+  return isProduction() || isEphemeralHost();
+}
+
 export function getJwtSecret(): string {
   if (cachedJwtSecret) return cachedJwtSecret;
 

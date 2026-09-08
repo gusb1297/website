@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { NewsItem } from '../types';
 import { Newspaper, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 const CATEGORIES = ['News', 'Event', 'Press Release', 'Impact Story'];
 
@@ -47,14 +48,14 @@ export const ManageNews: React.FC = () => {
         body: formData,
       });
 
-      if (!res.ok) throw new Error('সংবাদ সেভ করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'সংবাদ সেভ করা যায়নি'));
 
       setTitle('');
       setContent('');
       setThumbnailFile(null);
       refetch();
     } catch (err) {
-      alert('ত্রুটি ঘটেছে');
+      alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
     } finally {
       setSubmitting(false);
     }
@@ -85,11 +86,11 @@ export const ManageNews: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (!res.ok) throw new Error('সংবাদ আপডেট করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'সংবাদ আপডেট করা যায়নি'));
       setEditing(null);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     }
   };
 

@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { HeroSlide } from '../types';
 import { Plus, Trash2, Eye, EyeOff, Edit3, X, Save } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 export const ManageHeroSlider: React.FC = () => {
   const { token } = useAuth();
@@ -48,14 +49,14 @@ export const ManageHeroSlider: React.FC = () => {
         body: formData,
       });
 
-      if (!res.ok) throw new Error('স্লাইড সংরক্ষণ ব্যর্থ হয়েছে');
+      if (!res.ok) throw new Error(await readApiError(res, 'স্লাইড সংরক্ষণ ব্যর্থ হয়েছে'));
 
       setHeadline('');
       setSubtext('');
       setImageFile(null);
       refetch();
     } catch (err) {
-      alert('স্লাইড যোগ করতে সমস্যা হয়েছে');
+      alert(err instanceof Error ? err.message : 'স্লাইড যোগ করতে সমস্যা হয়েছে');
     } finally {
       setCreating(false);
     }
@@ -103,11 +104,11 @@ export const ManageHeroSlider: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (!res.ok) throw new Error('স্লাইড আপডেট করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'স্লাইড আপডেট করা যায়নি'));
       setEditing(null);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     }
   };
 

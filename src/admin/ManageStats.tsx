@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { StatItem } from '../types';
 import { BarChart3, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 const ICONS = ['Users', 'Coins', 'MapPin', 'School', 'HeartPulse', 'Award', 'Building', 'GraduationCap'];
 
@@ -33,12 +34,12 @@ export const ManageStats: React.FC = () => {
         },
         body: JSON.stringify({ label, value: Number(value), suffix, icon }),
       });
-      if (!res.ok) throw new Error('স্ট্যাট যোগ করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'স্ট্যাট যোগ করা যায়নি'));
       setLabel('');
       setValue(1000);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     } finally {
       setCreating(false);
     }
@@ -68,11 +69,11 @@ export const ManageStats: React.FC = () => {
           icon: editIcon,
         }),
       });
-      if (!res.ok) throw new Error('স্ট্যাট আপডেট করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'স্ট্যাট আপডেট করা যায়নি'));
       setEditing(null);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     }
   };
 

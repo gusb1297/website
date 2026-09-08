@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { Program } from '../types';
 import { Plus, Trash2, Edit3, X, Save } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 const ICON_OPTIONS = ['Coins', 'HeartPulse', 'GraduationCap', 'Sprout', 'Building', 'Award', 'School', 'MapPin'];
 
@@ -57,7 +58,7 @@ export const ManagePrograms: React.FC = () => {
         body: formData,
       });
 
-      if (!res.ok) throw new Error('প্রজেক্ট যোগ করতে ব্যর্থ হয়েছে');
+      if (!res.ok) throw new Error(await readApiError(res, 'প্রজেক্ট যোগ করতে ব্যর্থ হয়েছে'));
 
       setTitle('');
       setShortDesc('');
@@ -65,7 +66,7 @@ export const ManagePrograms: React.FC = () => {
       setCoverFile(null);
       refetch();
     } catch (err) {
-      alert('ত্রুটি ঘটেছে');
+      alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
     } finally {
       setSubmitting(false);
     }
@@ -102,11 +103,11 @@ export const ManagePrograms: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (!res.ok) throw new Error('প্রজেক্ট আপডেট করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'প্রজেক্ট আপডেট করা যায়নি'));
       setEditing(null);
       refetch();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     }
   };
 
