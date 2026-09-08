@@ -47,17 +47,17 @@ class ApiRequestError extends Error {
 }
 
 function apiErrorMessage(status: number, responseText = '', fallback = 'অনুরোধটি সম্পন্ন করা যায়নি।') {
-  if (status === 401 || status === 403) return 'আপনার সেশন শেষ হয়েছে অথবা এই কাজের অনুমতি নেই। আবার লগইন করুন।';
-  if (status === 413) return 'একটি ছবি সার্ভারের নির্ধারিত আকারসীমার চেয়ে বড়। ছোট আকারের ছবি দিন।';
-
-  // 503 = the server refused to store the file durably (Cloudinary missing /
-  // unreachable). Its message explains exactly what to configure, so show it.
+  // The server's own Bengali `message` is always the most specific explanation
+  // — e.g. "অ্যাকাউন্টটি আর সক্রিয় নেই।" (account revoked) on a 401, or the
+  // Cloudinary storage hint on a 503 — so it wins over status-based guesses.
   try {
-    const body = JSON.parse(responseText) as { message?: string; error?: string };
-    if (body.message) return body.message;
+    const body = JSON.parse(responseText) as { message?: string };
+    if (body.message && body.message.trim()) return body.message;
   } catch {
     // Keep the user-friendly fallback; technical response text goes to console.
   }
+  if (status === 401 || status === 403) return 'আপনার সেশন শেষ হয়েছে অথবা এই কাজের অনুমতি নেই। আবার লগইন করুন।';
+  if (status === 413) return 'একটি ছবি সার্ভারের নির্ধারিত আকারসীমার চেয়ে বড়। ছোট আকারের ছবি দিন।';
   if (status >= 500) return 'সার্ভারে সাময়িক সমস্যা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
   return fallback;
 }
@@ -290,6 +290,7 @@ interface AlbumPhotosPanelProps {
 }
 
 function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps) {
+  const { handleAuthError } = useAuth();
   const {
     data: photos,
     loading,
@@ -357,10 +358,12 @@ function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps)
         text: created.length === 1 ? 'ছবিটি সফলভাবে আপলোড হয়েছে।' : `${created.length}টি ছবি সফলভাবে আপলোড হয়েছে।`,
       });
     } catch (uploadError) {
-      setNotice({
-        kind: 'error',
-        text: uploadError instanceof Error ? uploadError.message : 'ছবি আপলোড করা যায়নি।',
-      });
+      const status = uploadError instanceof ApiRequestError ? uploadError.status : 0;
+      const text = uploadError instanceof Error ? uploadError.message : 'ছবি আপলোড করা যায়নি।';
+      // 401/403 = dead session. Clear it and let the shell redirect to login
+      // with this message instead of leaving the admin stuck mid-upload.
+      if (status === 401 || status === 403) handleAuthError(status, text);
+      setNotice({ kind: 'error', text });
     } finally {
       setSubmitting(false);
     }
@@ -393,10 +396,10 @@ function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps)
       setNotice({ kind: 'success', text: 'ছবিটি মুছে ফেলা হয়েছে।' });
     } catch (deleteError) {
       console.error('[gallery] Could not delete photo:', deleteError);
-      setNotice({
-        kind: 'error',
-        text: deleteError instanceof Error ? deleteError.message : 'ছবিটি মুছতে সমস্যা হয়েছে।',
-      });
+      const status = deleteError instanceof ApiRequestError ? deleteError.status : 0;
+      const text = deleteError instanceof Error ? deleteError.message : 'ছবিটি মুছতে সমস্যা হয়েছে।';
+      if (status === 401 || status === 403) handleAuthError(status, text);
+      setNotice({ kind: 'error', text });
     } finally {
       setDeletingId(null);
     }
@@ -526,7 +529,7 @@ function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps)
 }
 
 export const ManageGallery: React.FC = () => {
-  const { token } = useAuth();
+  const { token, handleAuthError } = useAuth();
   const {
     data: albums,
     loading: albumsLoading,
@@ -612,10 +615,10 @@ export const ManageGallery: React.FC = () => {
           : 'খালি অ্যালবামটি সফলভাবে তৈরি হয়েছে।',
       });
     } catch (createError) {
-      setCreateNotice({
-        kind: 'error',
-        text: createError instanceof Error ? createError.message : 'অ্যালবাম তৈরি করা যায়নি।',
-      });
+      const status = createError instanceof ApiRequestError ? createError.status : 0;
+      const text = createError instanceof Error ? createError.message : 'অ্যালবাম তৈরি করা যায়নি।';
+      if (status === 401 || status === 403) handleAuthError(status, text);
+      setCreateNotice({ kind: 'error', text });
     } finally {
       setCreating(false);
     }
@@ -676,10 +679,10 @@ export const ManageGallery: React.FC = () => {
       setEditCoverFile(null);
       setAlbumNotice({ kind: 'success', text: 'অ্যালবামের তথ্য আপডেট হয়েছে।' });
     } catch (editError) {
-      setAlbumNotice({
-        kind: 'error',
-        text: editError instanceof Error ? editError.message : 'অ্যালবাম আপডেট করা যায়নি।',
-      });
+      const status = editError instanceof ApiRequestError ? editError.status : 0;
+      const text = editError instanceof Error ? editError.message : 'অ্যালবাম আপডেট করা যায়নি।';
+      if (status === 401 || status === 403) handleAuthError(status, text);
+      setAlbumNotice({ kind: 'error', text });
     } finally {
       setSavingEdit(false);
     }
@@ -704,10 +707,10 @@ export const ManageGallery: React.FC = () => {
       setAlbumNotice({ kind: 'success', text: 'অ্যালবাম ও এর ছবিগুলো মুছে ফেলা হয়েছে।' });
     } catch (deleteError) {
       console.error('[gallery] Could not delete album:', deleteError);
-      setAlbumNotice({
-        kind: 'error',
-        text: deleteError instanceof Error ? deleteError.message : 'অ্যালবামটি মুছতে সমস্যা হয়েছে।',
-      });
+      const status = deleteError instanceof ApiRequestError ? deleteError.status : 0;
+      const text = deleteError instanceof Error ? deleteError.message : 'অ্যালবামটি মুছতে সমস্যা হয়েছে।';
+      if (status === 401 || status === 403) handleAuthError(status, text);
+      setAlbumNotice({ kind: 'error', text });
     } finally {
       setDeletingAlbumId(null);
     }

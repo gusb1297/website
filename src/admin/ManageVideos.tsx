@@ -24,7 +24,7 @@ type UploadMode = 'device' | 'link';
 const CATEGORY_OPTIONS = ['প্রামাণ্যচিত্র', 'সাফল্যের গল্প', 'মাঠপর্যায়ের কাজ', 'ইভেন্ট', 'প্রশিক্ষণ', 'সচেতনতা'];
 
 export const ManageVideos: React.FC = () => {
-  const { token } = useAuth();
+  const { token, handleAuthError } = useAuth();
   const { data: videos, refetch } = useFetch<VideoItem[]>('/api/videos');
 
   const [mode, setMode] = useState<UploadMode>('device');
@@ -138,6 +138,8 @@ export const ManageVideos: React.FC = () => {
         } catch {
           /* keep default */
         }
+        // 401/403 = dead session — clear it and let the shell redirect to login.
+        if (xhr.status === 401 || xhr.status === 403) handleAuthError(xhr.status, text);
         setMessage({ kind: 'err', text });
       }
     };
@@ -163,7 +165,11 @@ export const ManageVideos: React.FC = () => {
   const handleDelete = async (id: string) => {
     if (!confirm('আপনি কি এই ভিডিওটি মুছে ফেলতে চান?')) return;
     try {
-      await fetch(`/api/videos/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`/api/videos/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      if (res.status === 401 || res.status === 403) {
+        handleAuthError(res.status, 'আপনার সেশন শেষ হয়েছে অথবা এই কাজের অনুমতি নেই। আবার লগইন করুন।');
+        return;
+      }
       refetch();
     } catch (e) {
       console.error(e);
@@ -178,11 +184,15 @@ export const ManageVideos: React.FC = () => {
 
   const saveEdit = async (id: string) => {
     try {
-      await fetch(`/api/videos/${id}`, {
+      const res = await fetch(`/api/videos/${id}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: editTitle, category: editCategory }),
       });
+      if (res.status === 401 || res.status === 403) {
+        handleAuthError(res.status, 'আপনার সেশন শেষ হয়েছে অথবা এই কাজের অনুমতি নেই। আবার লগইন করুন।');
+        return;
+      }
       setEditingId(null);
       refetch();
     } catch (e) {

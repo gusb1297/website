@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { ManageHeroSlider } from './ManageHeroSlider';
@@ -53,9 +53,18 @@ type TabId =
   | 'admins';
 
 export const Dashboard: React.FC = () => {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, sessionExpired } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<TabId>('slides');
+
+  // A dead session (expired token / server restarted with a new JWT secret /
+  // account removed) sends the admin to the login page with an explanation
+  // instead of leaving them on a dashboard that can no longer save anything.
+  useEffect(() => {
+    if (sessionExpired) {
+      navigate('/admin/login', { replace: true, state: { message: sessionExpired } });
+    }
+  }, [sessionExpired, navigate]);
 
   if (!isAuthenticated) {
     return (
