@@ -150,6 +150,25 @@ npm run create-admin -- --email you@yourorg.org --password 'a-strong-password' -
    name, the app uses `MONGODB_DB` (default `gusb`) instead of mongoose’s `test` database.
 4. Restart the app after changing env vars. `GET /api/health` reports `{ mongo: { connected } }`.
 
+### If an upload says "আপনার সেশন শেষ হয়েছে … আবার লগইন করুন।" (session ended)
+
+That message means the server answered **401/403** — the admin's stored token no
+longer verifies. The panel itself still opens (the list endpoints are public),
+so the failure usually only shows up on the first photo/video upload or edit.
+Causes, in order of likelihood:
+
+1. **The server restarted without a persistent `JWT_SECRET`.** When the env var
+   is missing, a new random signing key is generated on every boot and *all*
+   logged-in sessions die. Fix: set a random `JWT_SECRET` (16+ characters) in
+   the host's environment variables (e.g. Render → Environment), restart, then
+   log in again.
+2. **The token expired** — tokens live for 7 days. Just log in again.
+3. **The account was removed or deactivated** in *অ্যাডমিন ব্যবস্থাপনা* — re-enable
+   it (the login page now shows the server's specific message for this case).
+
+The dashboard now verifies the stored session on load and bounces the admin to
+the login page with an explanation, so this never surprises them mid-upload.
+
 ### Emergency insert in Atlas (only if you must)
 
 Only do this if the app cannot run the methods above. Collection: **`admins`** (in the `gusb`

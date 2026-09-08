@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   Lock,
@@ -35,8 +35,12 @@ export const AdminLogin: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
+  // Shown when the admin was bounced here because their session died (expired
+  // token, server restarted, account removed) instead of logging out cleanly.
+  const [sessionNotice, setSessionNotice] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const loadStatus = async () => {
     setStatusLoading(true);
@@ -57,6 +61,16 @@ export const AdminLogin: React.FC = () => {
 
   useEffect(() => {
     loadStatus();
+  }, []);
+
+  useEffect(() => {
+    const state = location.state as { message?: string } | null;
+    if (state?.message) {
+      setSessionNotice(state.message);
+      // Show it once — clear the navigation state so a refresh doesn't repeat it.
+      navigate(location.pathname, { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -170,6 +184,13 @@ export const AdminLogin: React.FC = () => {
             >
               আবার চেক করুন
             </button>
+          </div>
+        )}
+
+        {sessionNotice && (
+          <div className="p-3 rounded-xl bg-amber-950/80 border border-amber-500/50 text-amber-100 text-xs font-semibold flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 shrink-0 text-amber-400" />
+            {sessionNotice}
           </div>
         )}
 
