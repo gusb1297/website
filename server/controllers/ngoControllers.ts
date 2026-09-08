@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { processVideoFile, probeVideoDuration } from '../config/ffmpeg';
-import { uploadToCloudinary, storeFile, destroyCloudinaryAsset } from '../config/cloudinary';
+import { uploadToCloudinary, storeFile, destroyCloudinaryAsset, StorageError } from '../config/cloudinary';
 import { MAX_GALLERY_FILES } from '../config/multer';
 import { parseVideoLink, formatDuration } from '../utils/videoSources';
 import {
@@ -72,6 +72,9 @@ export const uploadDirectFile = async (req: Request, res: Response) => {
     const url = await uploadToCloudinary(req.file.path, 'vdo_bogura');
     return res.json({ url });
   } catch (err: unknown) {
+    if (err instanceof StorageError) {
+      return res.status(err.status).json({ error: err.code, message: err.message });
+    }
     console.error('Direct file upload error:', err);
     return res.status(500).json({ error: 'Failed to upload file' });
   }
@@ -500,6 +503,9 @@ export const createVideo = async (req: Request, res: Response) => {
       error: 'ভিডিও ফাইল অথবা ইউটিউব লিঙ্ক দিন (send either a videoFile or an embedUrl)',
     });
   } catch (err) {
+    if (err instanceof StorageError) {
+      return res.status(err.status).json({ error: err.message, code: err.code, message: err.message });
+    }
     console.error('Video create error:', err);
     return res.status(500).json({ error: 'ভিডিও সংরক্ষণ করা যায়নি (Failed to save video)' });
   }
@@ -517,6 +523,9 @@ export const uploadVideo = async (req: Request, res: Response) => {
     persistStore();
     return res.status(201).json(newVid);
   } catch (err) {
+    if (err instanceof StorageError) {
+      return res.status(err.status).json({ error: err.message, code: err.code, message: err.message });
+    }
     console.error('Video upload error:', err);
     return res.status(500).json({ error: 'Failed to upload video' });
   }

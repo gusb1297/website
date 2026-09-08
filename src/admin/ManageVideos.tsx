@@ -133,7 +133,8 @@ export const ManageVideos: React.FC = () => {
       } else {
         let text = 'ভিডিও সংরক্ষণ করা যায়নি।';
         try {
-          text = JSON.parse(xhr.responseText).error || text;
+          const body = JSON.parse(xhr.responseText) as { message?: string; error?: string };
+          text = body.message || body.error || text;
         } catch {
           /* keep default */
         }

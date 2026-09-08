@@ -33,11 +33,16 @@ admin panel without touching code.
 - **No public header/footer on admin routes** – the admin panel is a standalone, independent shell.
 - **Site-wide theming** – two CSS custom properties (`--site-primary`, `--site-accent`) drive every brand
   color; changing them in admin recolors the whole site (Tailwind palette is mapped onto the tokens).
-- **Persistence** – all content is saved to `data/store.json` (debounced + flushed on shutdown), so admin
-  edits survive restarts. MongoDB is supported as an optional connection.
-- **Uploads** – local disk by default; Cloudinary when credentials are provided (videos use chunked
-  `upload_large`, so large files do not fail, and a Cloudinary failure silently falls back to local disk
-  so an upload is never lost).
+- **Persistence** – all content (hero slides, news, gallery records, settings, page copy, …) is saved
+  in **MongoDB** (`sitecontents` collection, debounced + flushed on shutdown), so admin edits survive
+  restarts **and redeploys**. `data/store.json` is only a local cache (and the sole store in development
+  without MongoDB); on first boot an existing `store.json` is migrated into MongoDB automatically.
+- **Uploads** – **Cloudinary** in production (videos use chunked `upload_large`, so large files do not
+  fail). On hosts whose disk is wiped on every deploy (Render, Heroku, Railway, Fly, Vercel) or when
+  `NODE_ENV=production`, an upload is *refused with a clear message* if Cloudinary is missing instead of
+  being written to a disk that will vanish. Local disk is used only in development.
+- **Storage status banner** – the admin dashboard shows where uploads / edits are being stored and
+  warns loudly when they would be lost on the next deploy. `GET /api/health` exposes the same data.
 - **Security** – JWT auth, admin role gating, login rate limiting, security headers, size-capped body
   parsing, JSON error handler, `x-powered-by` disabled, optional HSTS in production.
 - **Type-safe** – strict TypeScript end to end; `npm run lint` passes.
@@ -59,6 +64,36 @@ npm run dev
 ```
 
 Open **http://localhost:3000** for the public site and **http://localhost:3000/admin** for the admin panel.
+
+## ☁️ Where is everything stored? (read this before deploying)
+
+| Data | Stored in | If missing |
+| --- | --- | --- |
+| Admin accounts | MongoDB (`admins`) | nobody can log in |
+| **All site content** (slides, programs, news, videos, gallery records, notices, publications, committee, partners, stats, settings, page copy, CV applications) | MongoDB (`sitecontents`, one document) — `data/store.json` is only a cache | content lives only in `data/store.json` and **is wiped on every deploy** on Render/Heroku/Railway |
+| **Uploaded files** (images, PDFs, videos) | Cloudinary | in production / on an ephemeral host the upload is **refused** with an explanatory error; in development files go to `./uploads` |
+
+> **Why photos used to disappear after every update:** Render (and similar hosts) give the app a fresh
+> container on each deploy. Anything written to the local disk — `uploads/*.jpg` and `data/store.json`
+> — is gone. The fix is to keep content in MongoDB and files in Cloudinary. Both are now enforced and
+> visible: the admin dashboard shows a red banner until both are configured correctly.
+
+### Minimum environment for a live server (Render → *Environment*)
+
+```env
+NODE_ENV=production
+JWT_SECRET=<long random string>
+MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster.mongodb.net/gusb?retryWrites=true&w=majority
+CLOUDINARY_CLOUD_NAME=<from cloudinary.com dashboard>
+CLOUDINARY_API_KEY=<from cloudinary.com dashboard>
+CLOUDINARY_API_SECRET=<from cloudinary.com dashboard>
+```
+
+After saving the variables, redeploy once and open **/admin** — the banner at the top should turn green
+(“সব ঠিক আছে”). `GET /api/health` returns `storage.durable: true` and `content.durable: true`.
+
+Optional: `REQUIRE_CLOUD_STORAGE=false` allows local-disk uploads on a VPS with a real persistent disk;
+`REQUIRE_CLOUD_STORAGE=true` forces the Cloudinary requirement even in development.
 
 ## 🔐 Admin accounts
 
@@ -201,19 +236,20 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 | `PORT` | no (default 3000) | HTTP port |
 | `NODE_ENV` | no | Set `production` for the built server |
 | `JWT_SECRET` | **yes in prod** | Signs admin JWTs (min. 16 chars; random per restart in dev) |
-| `MONGODB_URI` | **yes** | MongoDB connection — stores all admin accounts |
+| `MONGODB_URI` | **yes** | MongoDB connection — stores all admin accounts **and all site content** |
 | `MONGODB_DB` | no (default `gusb`) | Database name when the URI path does not include one |
 | `BOOTSTRAP_ADMIN_EMAIL` | first run | Email of the automatically created first admin |
 | `BOOTSTRAP_ADMIN_PASSWORD` | first run | Password of the first admin (min. 8 chars) |
 | `BOOTSTRAP_ADMIN_NAME` | no | Display name of the first admin |
-| `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET` | no | Use Cloudinary for uploads (incl. video) instead of local disk |
+| `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET` | **yes in prod** | Cloudinary for all uploads (incl. video). Without it, production uploads are refused |
 | `CLOUDINARY_URL` | no | Alternative single-string Cloudinary credential |
+| `REQUIRE_CLOUD_STORAGE` | no | `true`/`false` — override the "uploads must go to Cloudinary" rule (default: on in production / ephemeral hosts) |
 | `MAX_UPLOAD_MB` | no (default 512) | Maximum size of a single general upload |
 | `MAX_IMAGE_UPLOAD_MB` | no (default 10) | Maximum size of each Photo Gallery image |
 
 ## 📄 API overview (all under `/api`)
 
-`auth/status` (Mongo + whether first-run setup is needed), `auth/setup` (create the first admin when the collection is empty), `auth/login`, `auth/me`, `admins` (GET/POST/PUT/DELETE, admin role only), `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
+`health` (Mongo / Cloudinary / content-persistence status), `auth/status` (Mongo + whether first-run setup is needed), `auth/setup` (create the first admin when the collection is empty), `auth/login`, `auth/me`, `admins` (GET/POST/PUT/DELETE, admin role only), `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
 `gallery/albums` (+ `/photos`), `committee`, `partners`, `career` (+ `/applications`),
 `stats`, `settings`, `page-content`. Public reads are open; writes require a valid admin JWT
 (settings & page-content additionally require the `admin` role).
@@ -225,7 +261,7 @@ video library (Home highlight + Gallery → ভিডিও গ্যালা�
 
 | Way | How | Where the file lives | Thumbnail |
 | --- | --- | --- | --- |
-| **Device upload** | Drag & drop / pick an MP4, WebM, MOV, MKV… (up to `MAX_UPLOAD_MB`, default 512 MB). A progress bar shows the upload and can be cancelled. | **Cloudinary** (chunked `upload_large`) when credentials are set — otherwise `uploads/videos/` on the server | Auto poster frame from Cloudinary (`so_2`), or ffmpeg locally; a custom image can be uploaded instead |
+| **Device upload** | Drag & drop / pick an MP4, WebM, MOV, MKV… (up to `MAX_UPLOAD_MB`, default 512 MB). A progress bar shows the upload and can be cancelled. | **Cloudinary** (chunked `upload_large`). In development without credentials: `uploads/videos/` on the server; in production the upload is refused until Cloudinary is configured | Auto poster frame from Cloudinary (`so_2`), or ffmpeg locally; a custom image can be uploaded instead |
 | **YouTube / Vimeo link** | Paste any URL: `watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`, `player.vimeo.com/…`, even a bare 11-char YouTube id. `?t=90` start offsets are preserved. | Nothing is stored — the video is embedded from the provider | `https://i.ytimg.com/vi/<id>/hqdefault.jpg` automatically (overridable) |
 
 ### Enabling Cloudinary
@@ -238,7 +274,8 @@ CLOUDINARY_API_SECRET="your-secret"
 
 Put these in `.env` (loaded automatically) and restart. Uploaded videos then get a Cloudinary CDN URL,
 `/api/videos/stream/:id` 302-redirects to it, and deleting a video also destroys the Cloudinary asset.
-Without credentials everything keeps working on local disk with HTTP-range streaming.
+Without credentials, development keeps working on local disk with HTTP-range streaming; production
+refuses device uploads (YouTube/Vimeo links still work since nothing is stored).
 
 ### Video API
 

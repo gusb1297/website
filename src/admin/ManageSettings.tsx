@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { SiteSettings, BranchOffice } from '../types';
 import { Settings, Save, CheckCircle2, Palette, Plus, Trash2, Pipette } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 const inputCls =
   'w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300 focus:outline-none focus:border-emerald-700';
@@ -241,14 +242,14 @@ export const ManageSettings: React.FC = () => {
         });
       }
 
-      if (!res.ok) throw new Error('সেটিংস আপডেট করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'সেটিংস আপডেট করা যায়নি'));
 
       setMsg('ওয়েবসাইট সেটিংস সফলভাবে সেভ করা হয়েছে!');
       setLogoFile(null);
       // Let the public site + admin preview pick up the new values/colors.
       notifySettingsUpdated();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে: সেটিংস সেভ করা যায়নি');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে: সেটিংস সেভ করা যায়নি');
     } finally {
       setSaving(false);
     }

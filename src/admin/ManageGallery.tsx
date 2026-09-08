@@ -49,14 +49,16 @@ class ApiRequestError extends Error {
 function apiErrorMessage(status: number, responseText = '', fallback = 'অনুরোধটি সম্পন্ন করা যায়নি।') {
   if (status === 401 || status === 403) return 'আপনার সেশন শেষ হয়েছে অথবা এই কাজের অনুমতি নেই। আবার লগইন করুন।';
   if (status === 413) return 'একটি ছবি সার্ভারের নির্ধারিত আকারসীমার চেয়ে বড়। ছোট আকারের ছবি দিন।';
-  if (status >= 500) return 'সার্ভারে সাময়িক সমস্যা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
 
+  // 503 = the server refused to store the file durably (Cloudinary missing /
+  // unreachable). Its message explains exactly what to configure, so show it.
   try {
     const body = JSON.parse(responseText) as { message?: string; error?: string };
     if (body.message) return body.message;
   } catch {
     // Keep the user-friendly fallback; technical response text goes to console.
   }
+  if (status >= 500) return 'সার্ভারে সাময়িক সমস্যা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
   return fallback;
 }
 

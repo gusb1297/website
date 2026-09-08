@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { PageContent, BilingualText } from '../types';
 import { LayoutTemplate, Save, CheckCircle2, Home as HomeIcon, Info } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 const inputCls =
   'w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300 focus:outline-none focus:border-emerald-700';
@@ -215,10 +216,10 @@ export const ManagePages: React.FC = () => {
         },
         body: JSON.stringify(draft),
       });
-      if (!res.ok) throw new Error('কন্টেন্ট সেভ করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'কন্টেন্ট সেভ করা যায়নি'));
       setMsg('পেজ কন্টেন্ট সফলভাবে সেভ করা হয়েছে!');
     } catch (e) {
-      alert('ত্রুটি ঘটেছে: কন্টেন্ট সেভ করা যায়নি');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে: কন্টেন্ট সেভ করা যায়নি');
     } finally {
       setSaving(false);
     }

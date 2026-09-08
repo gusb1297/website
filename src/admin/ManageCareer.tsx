@@ -3,6 +3,7 @@ import { useFetch } from '../hooks/useFetch';
 import { useAuth } from '../context/AuthContext';
 import { CareerCircular, Applicant } from '../types';
 import { Briefcase, Users, Download, Trash2, Mail, Phone, Edit3, X, Save } from 'lucide-react';
+import { readApiError } from '../utils/api';
 
 export const ManageCareer: React.FC = () => {
   const { token } = useAuth();
@@ -49,14 +50,14 @@ export const ManageCareer: React.FC = () => {
         body: formData,
       });
 
-      if (!res.ok) throw new Error('নিয়োগ বিজ্ঞপ্তি সেভ করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'নিয়োগ বিজ্ঞপ্তি সেভ করা যায়নি'));
 
       setTitle('');
       setDescription('');
       setPdfFile(null);
       refetchCareers();
     } catch (err) {
-      alert('ত্রুটি ঘটেছে');
+      alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
     } finally {
       setSubmitting(false);
     }
@@ -87,11 +88,11 @@ export const ManageCareer: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      if (!res.ok) throw new Error('বিজ্ঞপ্তি আপডেট করা যায়নি');
+      if (!res.ok) throw new Error(await readApiError(res, 'বিজ্ঞপ্তি আপডেট করা যায়নি'));
       setEditing(null);
       refetchCareers();
     } catch (e) {
-      alert('ত্রুটি ঘটেছে');
+      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
     }
   };
 
