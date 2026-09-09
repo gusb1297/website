@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, CloudOff, Database, HardDrive, LoaderCircle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CloudOff, Database, FileText, HardDrive, LoaderCircle, RefreshCw } from 'lucide-react';
 
 /**
  * Tells the admin, in plain words, WHERE uploads and content edits are stored —
  * and shouts when they cannot be.
  *
- * Media has exactly one home now: Cloudinary. Nothing is written to the server's
+ * Pictures & videos live in Cloudinary, PDFs/documents in the AM Storage
+ * gateway. Nothing is written to the server's
  * own disk any more, because on Render / Heroku / Railway that disk is wiped on
  * every deploy (that is how uploaded pictures used to vanish). So when the
  * credentials are missing, uploads are refused loudly instead of half-working —
@@ -23,6 +24,8 @@ interface HealthResponse {
     folder?: string;
     lastCheck?: { ok: boolean; at: string; error?: string } | null;
     hint?: string;
+    /** PDF / document gateway (AM Storage) — independent from Cloudinary. */
+    documents?: { provider: 'am-storage'; configured: boolean; host: string };
   };
   content?: {
     source: 'mongodb' | 'file' | 'none';
@@ -81,8 +84,10 @@ export const StorageStatusBanner: React.FC = () => {
   const storage = health.storage;
   const content = health.content;
   const filesReady = Boolean(storage?.configured && storage?.durable);
+  // Older servers do not report `documents` at all — treat that as "not a problem".
+  const documentsReady = storage?.documents ? storage.documents.configured : true;
   const contentDurable = Boolean(content?.durable);
-  const allGood = filesReady && contentDurable;
+  const allGood = filesReady && documentsReady && contentDurable;
 
   if (allGood && dismissedOk) return null;
 
@@ -91,13 +96,18 @@ export const StorageStatusBanner: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-900">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span className="inline-flex items-center gap-1.5 font-bold">
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" /> সব ঠিক আছে — ছবি/ভিডিও Cloudinary-তে ও কন্টেন্ট
-            MongoDB-তে সংরক্ষিত হচ্ছে।
+            <CheckCircle2 className="h-4 w-4 text-emerald-600" /> সব ঠিক আছে — ছবি/ভিডিও Cloudinary-তে, PDF ডকুমেন্ট
+            স্টোরেজে ও কন্টেন্ট MongoDB-তে সংরক্ষিত হচ্ছে।
           </span>
           <span className="inline-flex items-center gap-1 text-emerald-800">
             <HardDrive className="h-3.5 w-3.5" /> মিডিয়া: Cloudinary
             {storage?.cloudName ? ` (${storage.cloudName}${storage.folder ? `/${storage.folder}` : ''})` : ''}
           </span>
+          {storage?.documents ? (
+            <span className="inline-flex items-center gap-1 text-emerald-800">
+              <FileText className="h-3.5 w-3.5" /> PDF/নথি: AM Storage ({storage.documents.host})
+            </span>
+          ) : null}
         </div>
         <button onClick={() => setDismissedOk(true)} className="font-bold text-emerald-700 hover:underline">
           বন্ধ করুন
@@ -111,7 +121,7 @@ export const StorageStatusBanner: React.FC = () => {
   if (!storage?.configured) {
     problems.push({
       severity: 'error',
-      title: 'ছবি / ভিডিও / PDF আপলোড বন্ধ — Cloudinary কনফিগার করা নেই।',
+      title: 'ছবি / ভিডিও আপলোড বন্ধ — Cloudinary কনফিগার করা নেই।',
       detail:
         'হোস্টিং প্যানেলের Environment Variables-এ CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET ' +
         '(অথবা CLOUDINARY_URL) যোগ করে সার্ভার রিস্টার্ট করুন। Cloudinary-র ফ্রি টিয়ারই সাধারণত যথেষ্ট।',
@@ -121,6 +131,15 @@ export const StorageStatusBanner: React.FC = () => {
       severity: 'error',
       title: 'Cloudinary-র সাথে সংযোগ ব্যর্থ — আপলোড কাজ করবে না।',
       detail: `API key / secret ঠিক আছে কিনা দেখুন। ত্রুটি: ${storage.lastCheck.error || 'অজানা'}`,
+    });
+  }
+
+  if (storage?.documents && !storage.documents.configured) {
+    problems.push({
+      severity: 'error',
+      title: 'PDF / নথি আপলোড বন্ধ — ডকুমেন্ট স্টোরেজ (AM Storage) কনফিগার করা নেই।',
+      detail:
+        'Environment Variables-এ AM_STORAGE_BRIDGE_URL, AM_STORAGE_KEY_ID ও AM_STORAGE_KEY_SECRET সেট করে সার্ভার রিস্টার্ট করুন।',
     });
   }
 
@@ -169,6 +188,12 @@ export const StorageStatusBanner: React.FC = () => {
               </strong>
               {' · '}মিডিয়া →{' '}
               <strong>{storage?.configured ? `Cloudinary${storage.cloudName ? ` (${storage.cloudName})` : ''}` : 'কনফিগার করা নেই'}</strong>
+              {storage?.documents ? (
+                <>
+                  {' · '}PDF/নথি →{' '}
+                  <strong>{storage.documents.configured ? `AM Storage (${storage.documents.host})` : 'কনফিগার করা নেই'}</strong>
+                </>
+              ) : null}
             </p>
           </div>
         </div>

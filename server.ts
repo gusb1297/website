@@ -16,6 +16,7 @@ import { connectMongo, describeMongoStatus, startMongoReconnectLoop } from './se
 import { bootstrapAdminFromEnv } from './server/services/adminService';
 import { getJwtSecret, isEphemeralHost } from './server/config/env';
 import { StorageError, describeStorageStatus, verifyStorageConnection } from './server/services/storage';
+import { AmStorageError } from './server/services/amStorage';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -44,7 +45,7 @@ function errorHandler(err: Error, req: express.Request, res: express.Response, _
   // Upload refused because it could not be stored durably (no Cloudinary on an
   // ephemeral host, or Cloudinary rejected the file). This is an expected,
   // already-explained condition: log one line, not a stack trace.
-  if (err instanceof StorageError) {
+  if (err instanceof StorageError || err instanceof AmStorageError) {
     console.warn('[upload] refused:', err.message.split('\n')[0]);
     return res.status(err.status).json({ error: err.code, message: err.message });
   }
@@ -161,6 +162,7 @@ async function startServer() {
         folder: storage.folder,
         lastCheck: storage.lastCheck,
         hint: storage.hint,
+        documents: storage.documents,
       },
       content: {
         source: content.source,

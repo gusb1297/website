@@ -1,5 +1,5 @@
 /**
- * Client side of the Cloudinary upload system.
+ * Client side of the upload system (Cloudinary for media, AM Storage for PDFs).
  * ---------------------------------------------------------------------------
  * A file is uploaded the moment it is chosen: this module validates it, streams
  * it to `POST /api/uploads/<kind>` with XHR (so real byte progress is
@@ -28,7 +28,13 @@ export interface AssetValue {
 
 export interface StoredAsset extends AssetValue {
   kind: AssetKind;
-  storage: 'cloudinary';
+  /** Images/videos live in Cloudinary; PDFs & other documents in the AM Storage gateway. */
+  storage: 'cloudinary' | 'am-storage';
+}
+
+/** Human label of the place a given kind of file is stored (for toasts / chips). */
+export function storageLabelFor(kind: AssetKind): string {
+  return kind === 'document' || kind === 'cv' ? 'ডকুমেন্ট স্টোরেজ' : 'Cloudinary';
 }
 
 interface UploadSpec {

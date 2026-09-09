@@ -72,7 +72,8 @@ Open **http://localhost:3000** for the public site and **http://localhost:3000/a
 | --- | --- | --- |
 | Admin accounts | MongoDB (`admins`) | nobody can log in |
 | **All site content** (slides, programs, news, videos, gallery records, notices, publications, committee, partners, stats, settings, page copy, CV applications) | MongoDB (`sitecontents`, one document) — `data/store.json` is only a cache | content lives only in `data/store.json` and **is wiped on every deploy** on Render/Heroku/Railway |
-| **Uploaded files** (images, videos, PDFs, applicant CVs) | Cloudinary only | every upload is **refused** with an explanatory (Bengali) error — there is deliberately **no local-disk fallback any more** |
+| **Uploaded images & videos** | Cloudinary only | every upload is **refused** with an explanatory (Bengali) error — there is deliberately **no local-disk fallback any more** |
+| **Uploaded documents** (PDFs, DOC/DOCX/TXT, applicant CVs) | AM Storage gateway (`server/services/amStorage.ts`, `POST /api/v1/storage/upload`) — Cloudinary cannot host the site's PDFs | the upload is **refused** with a 503 + reason; override the built-in credentials with `AM_STORAGE_BRIDGE_URL`, `AM_STORAGE_KEY_ID`, `AM_STORAGE_KEY_SECRET` (`AM_STORAGE_AUTH_MODE=hmac` for signed requests) |
 
 > **Why photos used to disappear after every update:** the old upload code wrote the file into
 > `./uploads` on the container's own disk whenever Cloudinary was missing, returned HTTP 200 and showed a
@@ -90,6 +91,10 @@ MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster.mongodb.net/gusb?retryWrites=tru
 CLOUDINARY_CLOUD_NAME=<from cloudinary.com dashboard>
 CLOUDINARY_API_KEY=<from cloudinary.com dashboard>
 CLOUDINARY_API_SECRET=<from cloudinary.com dashboard>
+# Optional — PDF/document gateway (defaults are built in, set these to rotate keys)
+# AM_STORAGE_BRIDGE_URL=https://st.thamjj13.top
+# AM_STORAGE_KEY_ID=am_store_live_…
+# AM_STORAGE_KEY_SECRET=am_sec_live_…
 ```
 
 After saving the variables, redeploy once and open **/admin** — the banner at the top should turn green
