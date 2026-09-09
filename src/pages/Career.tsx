@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
+import { useFileInput } from '../hooks/useFileInput';
 import { CareerCircular } from '../types';
 import {
   Briefcase,
@@ -23,7 +24,7 @@ export const Career: React.FC = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [cvFile, setCvFile] = useState<File | null>(null);
+  const cvInput = useFileInput();
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -31,6 +32,9 @@ export const Career: React.FC = () => {
 
   const handleApplySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Read the file at submit time (state, falling back to the input itself)
+    // so the FormData always carries the file the browser is showing.
+    const cvFile = cvInput.getFile();
     if (!cvFile) {
       setErrorMsg('অনুগ্রহ করে আপনার সিভি (PDF ফরম্যাট) সিলেক্ট করুন।');
       return;
@@ -47,10 +51,12 @@ export const Career: React.FC = () => {
       formData.append('email', email);
       formData.append('phone', phone);
       formData.append('notes', notes);
-      formData.append('cvFile', cvFile);
+      // Field name must match `upload.single('cvFile')` on the server.
+      formData.append('cvFile', cvFile, cvFile.name);
 
       const res = await fetch('/api/career/apply', {
         method: 'POST',
+        // No Content-Type header: the browser sets multipart/form-data with the boundary.
         body: formData,
       });
 
@@ -70,7 +76,7 @@ export const Career: React.FC = () => {
       setName('');
       setEmail('');
       setPhone('');
-      setCvFile(null);
+      cvInput.reset();
       setNotes('');
       setTimeout(() => {
         setApplyModalOpen(false);
@@ -272,15 +278,17 @@ export const Career: React.FC = () => {
                   </label>
                   <div className="relative border-2 border-dashed border-slate-300 rounded-2xl p-4 text-center hover:border-emerald-600 transition-colors bg-slate-50">
                     <input
+                      ref={cvInput.inputRef}
                       type="file"
+                      name="cvFile"
                       required
-                      accept=".pdf"
-                      onChange={(e) => setCvFile(e.target.files?.[0] || null)}
+                      accept=".pdf,application/pdf"
+                      onChange={cvInput.onChange}
                       className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     />
                     <Upload className="w-8 h-8 text-emerald-800 mx-auto mb-1" />
                     <p className="text-xs font-bold text-slate-700">
-                      {cvFile ? cvFile.name : 'সিভি নির্বাচন করতে এখানে ক্লিক করুন (PDF)'}
+                      {cvInput.file ? cvInput.file.name : 'সিভি নির্বাচন করতে এখানে ক্লিক করুন (PDF)'}
                     </p>
                   </div>
                 </div>

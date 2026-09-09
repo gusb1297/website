@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useFetch } from '../hooks/useFetch';
+import { useFileInput } from '../hooks/useFileInput';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { SiteSettings, BranchOffice } from '../types';
@@ -121,7 +122,7 @@ export const ManageSettings: React.FC = () => {
   const [orgNameEn, setOrgNameEn] = useState('');
   const [tagline, setTagline] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
-  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const logoInput = useFileInput();
   const [establishedYear, setEstablishedYear] = useState(2010);
   const [address, setAddress] = useState('');
   const [addressEn, setAddressEn] = useState('');
@@ -216,6 +217,9 @@ export const ManageSettings: React.FC = () => {
       };
 
       let res: Response;
+      // Read the file at submit time (state, falling back to the input itself)
+      // so a logo that is visibly selected is never silently skipped.
+      const logoFile = logoInput.getFile();
       if (logoFile) {
         const formData = new FormData();
         Object.entries(body).forEach(([key, value]) => {
@@ -225,9 +229,11 @@ export const ManageSettings: React.FC = () => {
             formData.append(key, String(value));
           }
         });
-        formData.append('logo', logoFile);
+        // Field name must match `upload.single('logo')` on the server.
+        formData.append('logo', logoFile, logoFile.name);
         res = await fetch('/api/settings', {
           method: 'PUT',
+          // No Content-Type here: the browser sets multipart/form-data with the boundary.
           headers: { Authorization: `Bearer ${token}` },
           body: formData,
         });
@@ -245,7 +251,8 @@ export const ManageSettings: React.FC = () => {
       if (!res.ok) throw new Error(await readApiError(res, 'সেটিংস আপডেট করা যায়নি'));
 
       setMsg('ওয়েবসাইট সেটিংস সফলভাবে সেভ করা হয়েছে!');
-      setLogoFile(null);
+      // Clears the native input too, so the same logo is not re-uploaded on the next save.
+      logoInput.reset();
       // Let the public site + admin preview pick up the new values/colors.
       notifySettingsUpdated();
     } catch (e) {
@@ -313,11 +320,16 @@ export const ManageSettings: React.FC = () => {
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">লোগো আপলোড (নতুন)</label>
                 <input
+                  ref={logoInput.inputRef}
                   type="file"
+                  name="logo"
                   accept="image/*"
-                  onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+                  onChange={logoInput.onChange}
                   className="w-full px-3 py-2 rounded-xl text-xs bg-white border border-slate-300"
                 />
+                {logoInput.file && (
+                  <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {logoInput.file.name}</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">লোগো URL</label>

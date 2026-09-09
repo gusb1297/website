@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
+import { useFileInput } from '../hooks/useFileInput';
 import { useAuth } from '../context/AuthContext';
 import { Publication } from '../types';
 import { BookOpen, Trash2, FileText, Edit3, X, Save } from 'lucide-react';
@@ -12,7 +13,7 @@ export const ManagePublications: React.FC = () => {
   const [title, setTitle] = useState('');
   const [type, setType] = useState<'annual_report' | 'newsletter' | 'report'>('annual_report');
   const [year, setYear] = useState(String(new Date().getFullYear()));
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const pdfInput = useFileInput();
   const [submitting, setSubmitting] = useState(false);
 
   const [editing, setEditing] = useState<Publication | null>(null);
@@ -22,6 +23,9 @@ export const ManagePublications: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Read the file at submit time (state, falling back to the input itself)
+    // so the FormData always carries the file the browser is showing.
+    const pdfFile = pdfInput.getFile();
     if (!pdfFile) {
       alert('অনুগ্রহ করে একটি পিডিএফ ফাইল নির্বাচন করুন অথবা PDF URL দিন');
       return;
@@ -33,10 +37,12 @@ export const ManagePublications: React.FC = () => {
       formData.append('title', title);
       formData.append('type', type);
       formData.append('year', year);
-      formData.append('pdfFile', pdfFile);
+      // Field name must match `upload.fields([{ name: 'pdfFile' }, …])` on the server.
+      formData.append('pdfFile', pdfFile, pdfFile.name);
 
       const res = await fetch('/api/publications', {
         method: 'POST',
+        // No Content-Type here: the browser sets multipart/form-data with the boundary.
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
@@ -44,8 +50,9 @@ export const ManagePublications: React.FC = () => {
       if (!res.ok) throw new Error(await readApiError(res, 'পাবলিকেশন সেভ করা যায়নি'));
 
       setTitle('');
-      setPdfFile(null);
-        refetch();
+      // Clears the native input too, so the next publication cannot show a stale file.
+      pdfInput.reset();
+      refetch();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
     } finally {
@@ -143,12 +150,17 @@ export const ManagePublications: React.FC = () => {
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">পিডিএফ ফাইল (PDF Document Upload)</label>
               <input
+                ref={pdfInput.inputRef}
                 type="file"
+                name="pdfFile"
                 required
-                accept=".pdf"
-                onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
+                accept=".pdf,application/pdf"
+                onChange={pdfInput.onChange}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
+              {pdfInput.file && (
+                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {pdfInput.file.name}</p>
+              )}
             </div>
 
           </div>

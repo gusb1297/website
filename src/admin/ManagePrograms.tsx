@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
+import { useFileInput } from '../hooks/useFileInput';
 import { useAuth } from '../context/AuthContext';
 import { Program } from '../types';
 import { Plus, Trash2, Edit3, X, Save } from 'lucide-react';
@@ -18,7 +19,7 @@ export const ManagePrograms: React.FC = () => {
   const [status, setStatus] = useState<'ongoing' | 'completed'>('ongoing');
   const [beneficiariesCount, setBeneficiariesCount] = useState(10000);
   const [districtsCovered, setDistrictsCovered] = useState(5);
-  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const coverInput = useFileInput();
   // URL input removed - direct upload only
   const [submitting, setSubmitting] = useState(false);
 
@@ -30,10 +31,13 @@ export const ManagePrograms: React.FC = () => {
   const [editStatus, setEditStatus] = useState<'ongoing' | 'completed'>('ongoing');
   const [editBeneficiaries, setEditBeneficiaries] = useState(0);
   const [editDistricts, setEditDistricts] = useState(0);
-  const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
+  const editCoverInput = useFileInput();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Read the file at submit time (state, falling back to the input itself)
+    // so the FormData always carries the file the browser is showing.
+    const coverFile = coverInput.getFile();
     if (!coverFile) {
       alert('প্রজেক্টের কভার ছবি নির্বাচন করুন।');
       return;
@@ -50,10 +54,12 @@ export const ManagePrograms: React.FC = () => {
       formData.append('beneficiariesCount', String(beneficiariesCount));
       formData.append('districtsCovered', String(districtsCovered));
 
-      formData.append('coverImage', coverFile);
+      // Field name must match `upload.single('coverImage')` on the server.
+      formData.append('coverImage', coverFile, coverFile.name);
 
       const res = await fetch('/api/programs', {
         method: 'POST',
+        // No Content-Type here: the browser sets multipart/form-data with the boundary.
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
@@ -63,7 +69,8 @@ export const ManagePrograms: React.FC = () => {
       setTitle('');
       setShortDesc('');
       setContent('');
-      setCoverFile(null);
+      // Clears the native input too, so the next project cannot show a stale file.
+      coverInput.reset();
       refetch();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
@@ -81,7 +88,7 @@ export const ManagePrograms: React.FC = () => {
     setEditStatus(prog.status);
     setEditBeneficiaries(prog.beneficiariesCount || 0);
     setEditDistricts(prog.districtsCovered || 0);
-    setEditCoverFile(null);
+    editCoverInput.reset();
   };
 
   const handleSaveEdit = async () => {
@@ -95,8 +102,9 @@ export const ManagePrograms: React.FC = () => {
       formData.append('status', editStatus);
       formData.append('beneficiariesCount', String(editBeneficiaries));
       formData.append('districtsCovered', String(editDistricts));
+      const editCoverFile = editCoverInput.getFile();
       if (editCoverFile) {
-        formData.append('coverImage', editCoverFile);
+        formData.append('coverImage', editCoverFile, editCoverFile.name);
       }
       const res = await fetch(`/api/programs/${editing.id}`, {
         method: 'PUT',
@@ -105,6 +113,7 @@ export const ManagePrograms: React.FC = () => {
       });
       if (!res.ok) throw new Error(await readApiError(res, 'প্রজেক্ট আপডেট করা যায়নি'));
       setEditing(null);
+      editCoverInput.reset();
       refetch();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
@@ -219,12 +228,17 @@ export const ManagePrograms: React.FC = () => {
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">কভার ইমেজ আপলোড (Direct Upload)</label>
               <input
+                ref={coverInput.inputRef}
                 type="file"
+                name="coverImage"
                 required
                 accept="image/*"
-                onChange={(e) => setCoverFile(e.target.files?.[0] || null)}
+                onChange={coverInput.onChange}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
+              {coverInput.file && (
+                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {coverInput.file.name}</p>
+              )}
             </div>
 
 
@@ -276,7 +290,7 @@ export const ManagePrograms: React.FC = () => {
                   </div>
                   <input type="number" value={editBeneficiaries} onChange={(e) => setEditBeneficiaries(Number(e.target.value))} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="উপকৃত সংখ্যা" />
                   <input type="number" value={editDistricts} onChange={(e) => setEditDistricts(Number(e.target.value))} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="জেলা সংখ্যা" />
-                  <input type="file" accept="image/*" onChange={(e) => setEditCoverFile(e.target.files?.[0] || null)} className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" />
+                  <input ref={editCoverInput.inputRef} type="file" name="coverImage" accept="image/*" onChange={editCoverInput.onChange} className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" />
                   <div className="col-span-2 flex gap-2">
                     <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">
                       <Save className="w-3.5 h-3.5" /> আপডেট সেভ করুন
