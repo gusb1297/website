@@ -89,5 +89,7 @@ export function videoSourceLabel(video: VideoItem): string {
     if (video.provider === 'vimeo') return 'ভিমিও লিঙ্ক';
     return 'এমবেড লিঙ্ক';
   }
-  return video.storage === 'cloudinary' ? 'ক্লাউডিনারি আপলোড' : 'সার্ভার আপলোড';
+  // Only records created before the Cloudinary migration still point at the
+  // server's own ./uploads folder — say so, so nobody expects a new file there.
+  return video.storage === 'cloudinary' ? 'ক্লাউডিনারি আপলোড' : 'সার্ভার আপলোড (পুরোনো)';
 }

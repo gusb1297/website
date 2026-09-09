@@ -6,6 +6,8 @@ export interface BilingualText {
 export interface HeroSlide {
   id: string;
   image: string;
+  /** Cloudinary public id of `image` — kept so a replaced slide frees the file. */
+  imagePublicId?: string;
   headline: string;
   subtext: string;
   buttonText?: string;
@@ -22,6 +24,7 @@ export interface Program {
   shortDesc: string;
   content: string;
   coverImage: string;
+  coverImagePublicId?: string;
   status: 'ongoing' | 'completed';
   order: number;
   beneficiariesCount?: number;
@@ -34,6 +37,7 @@ export interface NewsItem {
   slug: string;
   category: 'News' | 'Event' | 'Press Release' | 'Impact Story';
   thumbnail: string;
+  thumbnailPublicId?: string;
   content: string;
   publishedAt: string;
   views: number;
@@ -54,6 +58,8 @@ export interface VideoItem {
   publicId?: string;
   /** Where an uploaded file physically lives. */
   storage?: VideoStorage;
+  /** Cloudinary public id of a custom poster image (`thumbnail`). */
+  thumbnailPublicId?: string;
   /** Provider of an embedded video. */
   provider?: VideoProviderName;
   /** Provider video id (e.g. the YouTube 11-char id). */
@@ -74,6 +80,7 @@ export interface Notice {
   id: string;
   title: string;
   pdfFile: string;
+  pdfFilePublicId?: string;
   publishedAt: string;
   expiryDate?: string;
   isActive: boolean;
@@ -85,8 +92,10 @@ export interface Publication {
   title: string;
   type: 'annual_report' | 'newsletter' | 'report';
   pdfFile: string;
+  pdfFilePublicId?: string;
   year: number;
   thumbnail?: string;
+  thumbnailPublicId?: string;
 }
 
 export type GalleryStorage = 'cloudinary' | 'local';
@@ -120,6 +129,7 @@ export interface CommitteeMember {
   designation: string;
   type: 'general' | 'executive' | 'advisory' | 'leadership';
   photo: string;
+  photoPublicId?: string;
   bio: string;
   order: number;
   email?: string;
@@ -130,6 +140,7 @@ export interface Partner {
   id: string;
   name: string;
   logo: string;
+  logoPublicId?: string;
   websiteUrl: string;
 }
 
@@ -141,6 +152,7 @@ export interface CareerCircular {
   location: string;
   vacancy: number;
   pdfFile?: string;
+  pdfFilePublicId?: string;
   isActive: boolean;
   createdAt: string;
 }
@@ -153,6 +165,7 @@ export interface Application {
   email: string;
   phone: string;
   cvFile?: string;
+  cvPublicId?: string;
   cvUrl?: string;
   notes?: string;
   submittedAt: string;
@@ -206,6 +219,7 @@ export interface SiteSettings {
   ngoNameEn: string;
   ngoTagline: string;
   logoUrl?: string;
+  logoPublicId?: string;
   address: string;
   addressEn: string;
   branchAddresses: BranchOffice[];

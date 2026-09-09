@@ -3,17 +3,9 @@ import jwt from 'jsonwebtoken';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
-import { processVideoFile, probeVideoDuration } from '../config/ffmpeg';
-import { uploadToCloudinary, storeFile, destroyCloudinaryAsset, StorageError } from '../config/cloudinary';
-import { MAX_GALLERY_FILES } from '../config/multer';
+import { deleteAsset } from '../services/storage';
 import { parseVideoLink, formatDuration } from '../utils/videoSources';
-import {
-  hasValidImageSignature,
-  removeGalleryImage,
-  removeUploadedFiles,
-  storeGalleryImage,
-  uploadedFiles,
-} from '../utils/galleryImages';
+import { AssetRef, readAsset, readAssetList, releaseAsset, toBool } from '../utils/assets';
 import { persistStore } from '../config/persistence';
 import { getJwtSecret } from '../config/env';
 import { AdminServiceError, getAuthStatus, setupFirstAdmin, verifyCredentials } from '../services/adminService';
@@ -63,22 +55,55 @@ const slugify = (input: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 
-// Direct File Upload (returns uploaded URL directly)
-export const uploadDirectFile = async (req: Request, res: Response) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+/**
+ * Media that has already been pushed to Cloudinary arrives here as a plain
+ * `{ url, publicId }` reference inside the JSON body. `assetOr` turns a missing
+ * or unusable reference into a clear 400 message (instead of saving a record
+ * with a broken picture, which is what the old multipart flow did).
+ */
+const assetOr = (
+  res: Response,
+  asset: AssetRef | null,
+  label: string
+): AssetRef | null => {
+  if (!asset?.url) {
+    res.status(400).json({
+      error: 'missing_asset',
+      message: `${label} সংযোগ করা যায়নি — ফাইলটি বেছে নিয়ে আপলোড শেষ হওয়ার পর আবার সেভ করুন।`,
+    });
+    return null;
   }
-  try {
-    const url = await uploadToCloudinary(req.file.path, 'vdo_bogura');
-    return res.json({ url });
-  } catch (err: unknown) {
-    if (err instanceof StorageError) {
-      return res.status(err.status).json({ error: err.code, message: err.message });
-    }
-    console.error('Direct file upload error:', err);
-    return res.status(500).json({ error: 'Failed to upload file' });
-  }
+  return asset;
 };
+
+/** How many pictures one album request may carry (they are uploaded one by one). */
+const MAX_GALLERY_PHOTOS = 40;
+
+/**
+ * Same as `assetOr` but for attachments that may legitimately be left out
+ * (a career circular without a PDF, …). An empty value is accepted; a value that
+ * looks like it was meant to be a URL but is not gets reported instead of being
+ * saved into the record.
+ */
+const optionalAsset = (
+  res: Response,
+  body: Record<string, unknown>,
+  key: string,
+  label: string
+): { ok: boolean; asset: AssetRef | null } => {
+  const raw = body?.[key];
+  if (raw === undefined || raw === null || raw === '') return { ok: true, asset: null };
+  const asset = readAsset(body, key);
+  if (!asset) {
+    res.status(400).json({
+      error: 'invalid_asset',
+      message: `${label}-এর ঠিকানা সঠিক নয়। ফাইলটি আবার আপলোড করে তারপর সেভ করুন।`,
+    });
+    return { ok: false, asset: null };
+  }
+  return { ok: true, asset };
+};
+
 
 // 1. AUTH CONTROLLER
 export const authStatus = async (_req: Request, res: Response) => {
@@ -149,21 +174,21 @@ export const getHeroSlides = (req: Request, res: Response) => {
 };
 
 export const createHeroSlide = async (req: Request, res: Response) => {
-  let imagePath = req.body.image;
-  if (req.file) {
-    imagePath = await uploadToCloudinary(req.file.path, 'vdo_bogura/hero');
-  }
-  if (!requireFields(res, { image: imagePath, headline: req.body.headline, subtext: req.body.subtext })) return;
+  const image = readAsset(req.body, 'image');
+  if (!requireFields(res, { headline: req.body.headline, subtext: req.body.subtext })) return;
+  const asset = assetOr(res, image, 'স্লাইডের ছবি');
+  if (!asset) return;
 
   const newSlide: HeroSlide = {
     id: 'hs-' + Date.now(),
-    image: imagePath,
+    image: asset.url,
+    imagePublicId: asset.publicId,
     headline: req.body.headline,
     subtext: req.body.subtext,
     buttonText: req.body.buttonText,
     buttonLink: req.body.buttonLink,
     order: memoryStore.heroSlides.length + 1,
-    isActive: req.body.isActive !== 'false',
+    isActive: toBool(req.body.isActive, true),
   };
   memoryStore.heroSlides.push(newSlide);
   persistStore();
@@ -175,19 +200,34 @@ export const updateHeroSlide = async (req: Request, res: Response) => {
   const index = memoryStore.heroSlides.findIndex((s) => s.id === id);
   if (index === -1) return res.status(404).json({ error: 'Slide not found' });
 
-  if (req.file) {
-    req.body.image = await uploadToCloudinary(req.file.path, 'vdo_bogura/hero');
+  const previous = memoryStore.heroSlides[index];
+  const image = readAsset(req.body, 'image');
+
+  const next: HeroSlide = {
+    ...previous,
+    headline: req.body.headline !== undefined ? req.body.headline : previous.headline,
+    subtext: req.body.subtext !== undefined ? req.body.subtext : previous.subtext,
+    buttonText: req.body.buttonText !== undefined ? req.body.buttonText : previous.buttonText,
+    buttonLink: req.body.buttonLink !== undefined ? req.body.buttonLink : previous.buttonLink,
+    order: Number(req.body.order ?? previous.order),
+    isActive: toBool(req.body.isActive, previous.isActive),
+    ...(image
+      ? { image: image.url, imagePublicId: image.publicId }
+      : { image: previous.image, imagePublicId: previous.imagePublicId }),
+    id,
+  };
+
+  memoryStore.heroSlides[index] = next;
+  persistStore();
+
+  // The replaced picture is no longer shown anywhere → drop it from Cloudinary.
+  if (image && image.url !== previous.image) {
+    await releaseAsset({ url: previous.image, publicId: previous.imagePublicId }, (url) =>
+      memoryStore.heroSlides.some((slide) => slide.id !== id && slide.image === url)
+    );
   }
 
-  memoryStore.heroSlides[index] = {
-    ...memoryStore.heroSlides[index],
-    ...req.body,
-    id,
-    order: Number(req.body.order ?? memoryStore.heroSlides[index].order),
-    isActive: req.body.isActive !== undefined ? Boolean(req.body.isActive) : memoryStore.heroSlides[index].isActive,
-  };
-  persistStore();
-  res.json(memoryStore.heroSlides[index]);
+  res.json(next);
 };
 
 export const reorderHeroSlides = (req: Request, res: Response) => {
@@ -203,10 +243,16 @@ export const reorderHeroSlides = (req: Request, res: Response) => {
   res.json(memoryStore.heroSlides);
 };
 
-export const deleteHeroSlide = (req: Request, res: Response) => {
+export const deleteHeroSlide = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.heroSlides.find((s) => s.id === id);
   memoryStore.heroSlides = memoryStore.heroSlides.filter((s) => s.id !== id);
   persistStore();
+  if (target) {
+    await releaseAsset({ url: target.image, publicId: target.imagePublicId }, (url) =>
+      memoryStore.heroSlides.some((slide) => slide.image === url)
+    );
+  }
   res.json({ message: 'Slide deleted' });
 };
 
@@ -224,11 +270,10 @@ export const getProgramBySlug = (req: Request, res: Response) => {
 };
 
 export const createProgram = async (req: Request, res: Response) => {
-  let coverImage = req.body.coverImage;
-  if (req.file) {
-    coverImage = await uploadToCloudinary(req.file.path, 'vdo_bogura/programs');
-  }
-  if (!requireFields(res, { title: req.body.title, shortDesc: req.body.shortDesc, content: req.body.content, coverImage })) return;
+  const cover = readAsset(req.body, 'coverImage');
+  if (!requireFields(res, { title: req.body.title, shortDesc: req.body.shortDesc, content: req.body.content })) return;
+  const asset = assetOr(res, cover, 'প্রজেক্টের কভার ছবি');
+  if (!asset) return;
 
   const slug = slugify(req.body.slug || req.body.title || '') || 'program-' + Date.now();
   const newProgram: Program = {
@@ -238,8 +283,9 @@ export const createProgram = async (req: Request, res: Response) => {
     icon: req.body.icon || 'Sprout',
     shortDesc: req.body.shortDesc,
     content: req.body.content,
-    coverImage,
-    status: req.body.status || 'ongoing',
+    coverImage: asset.url,
+    coverImagePublicId: asset.publicId,
+    status: req.body.status === 'completed' ? 'completed' : 'ongoing',
     order: memoryStore.programs.length + 1,
     beneficiariesCount: Number(req.body.beneficiariesCount || 0),
     districtsCovered: Number(req.body.districtsCovered || 0),
@@ -254,23 +300,50 @@ export const updateProgram = async (req: Request, res: Response) => {
   const index = memoryStore.programs.findIndex((p) => p.id === id);
   if (index === -1) return res.status(404).json({ error: 'Program not found' });
 
-  if (req.file) {
-    req.body.coverImage = await uploadToCloudinary(req.file.path, 'vdo_bogura/programs');
-  }
+  const previous = memoryStore.programs[index];
+  const cover = readAsset(req.body, 'coverImage');
+  const keep = <T>(value: unknown, fallback: T): T => (value === undefined ? fallback : (value as T));
 
-  memoryStore.programs[index] = {
-    ...memoryStore.programs[index],
-    ...req.body,
+  const next: Program = {
+    ...previous,
+    title: keep(req.body.title, previous.title),
+    shortDesc: keep(req.body.shortDesc, previous.shortDesc),
+    content: keep(req.body.content, previous.content),
+    icon: keep(req.body.icon, previous.icon),
+    status: req.body.status === 'ongoing' || req.body.status === 'completed' ? req.body.status : previous.status,
+    beneficiariesCount:
+      req.body.beneficiariesCount !== undefined ? Number(req.body.beneficiariesCount) : previous.beneficiariesCount,
+    districtsCovered:
+      req.body.districtsCovered !== undefined ? Number(req.body.districtsCovered) : previous.districtsCovered,
+    order: req.body.order !== undefined ? Number(req.body.order) : previous.order,
+    ...(cover
+      ? { coverImage: cover.url, coverImagePublicId: cover.publicId }
+      : { coverImage: previous.coverImage, coverImagePublicId: previous.coverImagePublicId }),
     id,
   };
+
+  memoryStore.programs[index] = next;
   persistStore();
-  res.json(memoryStore.programs[index]);
+
+  if (cover && cover.url !== previous.coverImage) {
+    await releaseAsset({ url: previous.coverImage, publicId: previous.coverImagePublicId }, (url) =>
+      memoryStore.programs.some((program) => program.id !== id && program.coverImage === url)
+    );
+  }
+
+  res.json(next);
 };
 
-export const deleteProgram = (req: Request, res: Response) => {
+export const deleteProgram = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.programs.find((p) => p.id === id);
   memoryStore.programs = memoryStore.programs.filter((p) => p.id !== id);
   persistStore();
+  if (target) {
+    await releaseAsset({ url: target.coverImage, publicId: target.coverImagePublicId }, (url) =>
+      memoryStore.programs.some((program) => program.coverImage === url)
+    );
+  }
   res.json({ message: 'Program deleted' });
 };
 
@@ -300,20 +373,24 @@ export const getNewsBySlug = (req: Request, res: Response) => {
   res.json(news);
 };
 
+const NEWS_CATEGORIES = ['News', 'Event', 'Press Release', 'Impact Story'] as const;
+
 export const createNews = async (req: Request, res: Response) => {
-  let thumbnail = req.body.thumbnail;
-  if (req.file) {
-    thumbnail = await uploadToCloudinary(req.file.path, 'vdo_bogura/news');
-  }
-  if (!requireFields(res, { title: req.body.title, content: req.body.content, thumbnail })) return;
+  const thumbnail = readAsset(req.body, 'thumbnail');
+  if (!requireFields(res, { title: req.body.title, content: req.body.content })) return;
+  const asset = assetOr(res, thumbnail, 'সংবাদের থাম্বনেইল ছবি');
+  if (!asset) return;
 
   const slug = slugify(req.body.slug || req.body.title || '') || 'news-' + Date.now();
   const newNews: NewsItem = {
     id: 'news-' + Date.now(),
     title: req.body.title,
     slug,
-    category: req.body.category || 'News',
-    thumbnail,
+    category: (NEWS_CATEGORIES as readonly string[]).includes(req.body.category)
+      ? req.body.category
+      : 'News',
+    thumbnail: asset.url,
+    thumbnailPublicId: asset.publicId,
     content: req.body.content,
     publishedAt: req.body.publishedAt || new Date().toISOString(),
     views: 0,
@@ -329,23 +406,46 @@ export const updateNews = async (req: Request, res: Response) => {
   const index = memoryStore.news.findIndex((n) => n.id === id);
   if (index === -1) return res.status(404).json({ error: 'News item not found' });
 
-  if (req.file) {
-    req.body.thumbnail = await uploadToCloudinary(req.file.path, 'vdo_bogura/news');
-  }
+  const previous = memoryStore.news[index];
+  const thumbnail = readAsset(req.body, 'thumbnail');
+  const keep = <T>(value: unknown, fallback: T): T => (value === undefined ? fallback : (value as T));
 
-  memoryStore.news[index] = {
-    ...memoryStore.news[index],
-    ...req.body,
+  const next: NewsItem = {
+    ...previous,
+    title: keep(req.body.title, previous.title),
+    content: keep(req.body.content, previous.content),
+    author: keep(req.body.author, previous.author),
+    publishedAt: keep(req.body.publishedAt, previous.publishedAt),
+    category:
+      (NEWS_CATEGORIES as readonly string[]).includes(req.body.category) ? req.body.category : previous.category,
+    ...(thumbnail
+      ? { thumbnail: thumbnail.url, thumbnailPublicId: thumbnail.publicId }
+      : { thumbnail: previous.thumbnail, thumbnailPublicId: previous.thumbnailPublicId }),
     id,
   };
+
+  memoryStore.news[index] = next;
   persistStore();
-  res.json(memoryStore.news[index]);
+
+  if (thumbnail && thumbnail.url !== previous.thumbnail) {
+    await releaseAsset({ url: previous.thumbnail, publicId: previous.thumbnailPublicId }, (url) =>
+      memoryStore.news.some((item) => item.id !== id && item.thumbnail === url)
+    );
+  }
+
+  res.json(next);
 };
 
-export const deleteNews = (req: Request, res: Response) => {
+export const deleteNews = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.news.find((n) => n.id === id);
   memoryStore.news = memoryStore.news.filter((n) => n.id !== id);
   persistStore();
+  if (target) {
+    await releaseAsset({ url: target.thumbnail, publicId: target.thumbnailPublicId }, (url) =>
+      memoryStore.news.some((item) => item.thumbnail === url)
+    );
+  }
   res.json({ message: 'News item deleted' });
 };
 
@@ -357,204 +457,132 @@ export const getVideos = (req: Request, res: Response) => {
   res.json(list);
 };
 
-type MulterFiles = Record<string, Express.Multer.File[]> | undefined;
-
-/** Pull the first matching file out of an `upload.fields()` request. */
-const pickFile = (req: Request, names: string[]): Express.Multer.File | undefined => {
-  const files = req.files as MulterFiles;
-  if (files) {
-    for (const name of names) {
-      const match = files[name]?.[0];
-      if (match) return match;
-    }
-  }
-  return (req.file && names.includes(req.file.fieldname) ? req.file : undefined) || undefined;
-};
-
-/** No stock imagery: when no poster can be derived the player renders its own placeholder. */
+/**
+ * A video record is one of two things:
+ *
+ *   • `upload` — the file was pushed to Cloudinary by `POST /api/uploads/video`
+ *     and the record only keeps the returned URL + public id (so deleting the
+ *     video also deletes the cloud file);
+ *   • `embed`  — a YouTube / Vimeo (or any external) link the admin pasted.
+ */
 const DEFAULT_VIDEO_THUMB = '';
 
-/**
- * Build a video record from an uploaded device file.
- * Cloudinary is used whenever it is configured (chunked upload for big files,
- * auto poster frame); otherwise the file is kept on local disk and streamed
- * through /api/videos/stream/:id.
- */
-async function buildUploadedVideo(
-  file: Express.Multer.File,
-  body: Record<string, string | undefined>,
-  thumbnailFile?: Express.Multer.File
-): Promise<VideoItem> {
-  // Read the real duration while the file is still on local disk.
-  let durationSeconds = await probeVideoDuration(file.path);
+interface VideoBody {
+  title?: string;
+  category?: string;
+  description?: string;
+  type?: string;
+  embedUrl?: string;
+  youtubeUrl?: string;
+  url?: string;
+  duration?: string;
+  thumbnail?: unknown;
+  filePath?: unknown;
+}
 
-  const stored = await storeFile(file.path, {
-    folder: 'vdo_bogura/videos',
-    resourceType: 'video',
-  });
-
-  let thumbnail: string;
-  if (stored.storage === 'cloudinary') {
-    // Cloudinary derives the poster frame itself — no ffmpeg needed.
-    durationSeconds = stored.duration ?? durationSeconds;
-    thumbnail = stored.thumbnailUrl || DEFAULT_VIDEO_THUMB;
-  } else {
-    // Local disk: generate a poster frame with ffmpeg (falls back to a
-    // placeholder when ffmpeg is not installed on the host).
-    const processed = await processVideoFile(file.path);
-    thumbnail = processed.thumbnailPath;
-    durationSeconds = durationSeconds ?? processed.durationSeconds;
-  }
-
-  // Admin supplied a custom poster image → store it too and prefer it.
-  if (thumbnailFile) {
-    const storedThumb = await storeFile(thumbnailFile.path, { folder: 'vdo_bogura/thumbnails' });
-    thumbnail = storedThumb.url;
-  }
+/** Uploaded file + optional custom poster → VideoItem. */
+function buildUploadedVideo(body: VideoBody, asset: AssetRef, poster: AssetRef | null): VideoItem {
+  const durationSeconds = typeof asset.duration === 'number' && asset.duration > 0 ? asset.duration : undefined;
 
   return {
     id: 'vid-' + Date.now(),
-    title: body.title?.trim() || file.originalname,
+    title: (body.title || '').trim() || asset.originalName || 'ভিডিও',
     type: 'upload',
-    filePath: stored.url,
-    publicId: stored.publicId,
-    storage: stored.storage,
-    thumbnail,
+    filePath: asset.url,
+    publicId: asset.publicId,
+    storage: 'cloudinary',
+    thumbnail: (poster?.url || asset.thumbnailUrl || DEFAULT_VIDEO_THUMB).trim(),
+    thumbnailPublicId: poster?.publicId,
     duration: formatDuration(durationSeconds) || '00:00',
     durationSeconds,
-    sizeBytes: stored.bytes ?? file.size,
+    sizeBytes: asset.bytes,
     uploadedAt: new Date().toISOString(),
-    category: body.category?.trim() || 'General',
-    description: body.description?.trim() || undefined,
+    category: (body.category || '').trim() || 'General',
+    description: (body.description || '').trim() || undefined,
   };
 }
 
 /** Build a video record from a pasted YouTube / Vimeo / direct link. */
-function buildEmbeddedVideo(body: Record<string, string | undefined>, thumbnailUrl?: string): VideoItem | null {
+function buildEmbeddedVideo(body: VideoBody, thumbnailUrl?: string): VideoItem | null {
   const rawUrl = (body.embedUrl || body.youtubeUrl || body.url || '').trim();
   const parsed = parseVideoLink(rawUrl);
   if (!parsed) return null;
 
   return {
     id: 'vid-' + Date.now(),
-    title: body.title?.trim() || 'ভিডিও',
+    title: (body.title || '').trim() || 'ভিডিও',
     type: 'embed',
     provider: parsed.provider,
     providerId: parsed.videoId,
     embedUrl: parsed.embedUrl,
     watchUrl: parsed.watchUrl,
-    thumbnail: thumbnailUrl || body.thumbnail?.trim() || parsed.thumbnail || DEFAULT_VIDEO_THUMB,
-    duration: body.duration?.trim() || undefined,
+    thumbnail: thumbnailUrl || (typeof body.thumbnail === 'string' ? body.thumbnail.trim() : '') || parsed.thumbnail || DEFAULT_VIDEO_THUMB,
+    duration: typeof body.duration === 'string' ? body.duration.trim() || undefined : undefined,
     uploadedAt: new Date().toISOString(),
-    category: body.category?.trim() || 'Highlight',
-    description: body.description?.trim() || undefined,
+    category: (body.category || '').trim() || 'Highlight',
+    description: (body.description || '').trim() || undefined,
   };
 }
 
 /**
- * Unified two-way video endpoint (POST /api/videos).
+ * Unified video endpoint (POST /api/videos).
  *
- * 1. **Device upload** – send `videoFile` (or `video`) as multipart/form-data;
- *    the file goes to Cloudinary when configured, local disk otherwise.
- * 2. **YouTube / Vimeo link** – send `embedUrl` (or `youtubeUrl`); any YouTube
- *    URL shape is normalised to a real embed URL with an auto thumbnail.
- *
- * The mode can be forced with `type=upload|embed`, otherwise it is detected
- * from what was actually sent.
+ * `type=upload` with a `filePath` asset, or `type=embed` with a link — the mode
+ * is also detected automatically from what the form actually sent.
  */
-export const createVideo = async (req: Request, res: Response) => {
-  const body = (req.body || {}) as Record<string, string | undefined>;
-  const videoFile = pickFile(req, ['videoFile', 'video', 'file']);
-  const thumbnailFile = pickFile(req, ['thumbnail', 'thumbnailFile', 'poster']);
+export const createVideo = (req: Request, res: Response) => {
+  const body = (req.body || {}) as VideoBody & Record<string, unknown>;
+  const asset = readAsset(body, 'filePath', 'filePathPublicId', 'video');
+  const poster = readAsset(body, 'thumbnail');
   const linkValue = (body.embedUrl || body.youtubeUrl || body.url || '').trim();
   const requestedType = body.type === 'upload' || body.type === 'embed' ? body.type : undefined;
-  const mode = requestedType || (videoFile ? 'upload' : linkValue ? 'embed' : undefined);
+  const mode = requestedType || (asset ? 'upload' : linkValue ? 'embed' : undefined);
 
-  try {
-    if (mode === 'upload') {
-      if (!videoFile) {
-        return res.status(400).json({ error: 'অনুগ্রহ করে একটি ভিডিও ফাইল নির্বাচন করুন (videoFile)' });
-      }
-      const newVid = await buildUploadedVideo(videoFile, body, thumbnailFile);
-      memoryStore.videos.unshift(newVid);
-      persistStore();
-      return res.status(201).json(newVid);
+  if (mode === 'upload') {
+    if (!asset) {
+      return res.status(400).json({
+        error: 'missing_video_file',
+        message: 'ভিডিও ফাইলটি Cloudinary-তে আপলোড হয়নি। ফাইল বেছে নিয়ে আপলোড শেষ হলে আবার সেভ করুন।',
+      });
     }
-
-    if (mode === 'embed') {
-      let customThumb: string | undefined;
-      if (thumbnailFile) {
-        const storedThumb = await storeFile(thumbnailFile.path, { folder: 'vdo_bogura/thumbnails' });
-        customThumb = storedThumb.url;
-      }
-      const newVid = buildEmbeddedVideo(body, customThumb);
-      if (!newVid) {
-        return res.status(400).json({ error: 'সঠিক ইউটিউব/ভিমিও লিঙ্ক দিন (Invalid video link)' });
-      }
-      if (!body.title?.trim()) {
-        return res.status(400).json({ error: 'ভিডিও শিরোনাম আবশ্যক (Title is required)' });
-      }
-      memoryStore.videos.unshift(newVid);
-      persistStore();
-      return res.status(201).json(newVid);
+    if (!(body.title || '').trim()) {
+      return res.status(400).json({ error: 'missing_title', message: 'ভিডিওর শিরোনাম লিখুন।' });
     }
-
-    return res.status(400).json({
-      error: 'ভিডিও ফাইল অথবা ইউটিউব লিঙ্ক দিন (send either a videoFile or an embedUrl)',
-    });
-  } catch (err) {
-    if (err instanceof StorageError) {
-      return res.status(err.status).json({ error: err.message, code: err.code, message: err.message });
-    }
-    console.error('Video create error:', err);
-    return res.status(500).json({ error: 'ভিডিও সংরক্ষণ করা যায়নি (Failed to save video)' });
-  }
-};
-
-/** Legacy endpoint kept for older admin builds: POST /api/videos/upload. */
-export const uploadVideo = async (req: Request, res: Response) => {
-  const file = pickFile(req, ['video', 'videoFile', 'file']);
-  if (!file) {
-    return res.status(400).json({ error: 'Please upload a video file' });
-  }
-  try {
-    const newVid = await buildUploadedVideo(file, (req.body || {}) as Record<string, string>, pickFile(req, ['thumbnail']));
+    const newVid = buildUploadedVideo(body, asset, poster);
     memoryStore.videos.unshift(newVid);
     persistStore();
     return res.status(201).json(newVid);
-  } catch (err) {
-    if (err instanceof StorageError) {
-      return res.status(err.status).json({ error: err.message, code: err.code, message: err.message });
-    }
-    console.error('Video upload error:', err);
-    return res.status(500).json({ error: 'Failed to upload video' });
   }
-};
 
-/** Legacy endpoint kept for older admin builds: POST /api/videos/embed. */
-export const embedVideo = (req: Request, res: Response) => {
-  const body = (req.body || {}) as Record<string, string | undefined>;
-  if (!body.title || !(body.embedUrl || body.youtubeUrl || body.url)) {
-    return res.status(400).json({ error: 'Title and Embed URL are required' });
+  if (mode === 'embed') {
+    if (!(body.title || '').trim()) {
+      return res.status(400).json({ error: 'missing_title', message: 'ভিডিওর শিরোনাম লিখুন।' });
+    }
+    const newVid = buildEmbeddedVideo(body, poster?.url);
+    if (!newVid) {
+      return res.status(400).json({
+        error: 'invalid_video_link',
+        message: 'সঠিক ইউটিউব/ভিমিও লিঙ্ক দিন (Invalid video link)।',
+      });
+    }
+    memoryStore.videos.unshift(newVid);
+    persistStore();
+    return res.status(201).json(newVid);
   }
-  const newVid = buildEmbeddedVideo(body);
-  if (!newVid) {
-    return res.status(400).json({ error: 'Invalid video link' });
-  }
-  memoryStore.videos.unshift(newVid);
-  persistStore();
-  res.status(201).json(newVid);
+
+  return res.status(400).json({
+    error: 'missing_video',
+    message: 'ভিডিও ফাইল অথবা ইউটিউব লিঙ্ক দিন (send either an uploaded file or an embedUrl)।',
+  });
 };
 
 /** Update the editable metadata of a video (title / category / link / poster). */
 export const updateVideo = async (req: Request, res: Response) => {
   const { id } = req.params;
   const existing = memoryStore.videos.find((v) => v.id === id);
-  if (!existing) {
-    return res.status(404).json({ error: 'Video not found' });
-  }
+  if (!existing) return res.status(404).json({ error: 'Video not found' });
 
-  const body = (req.body || {}) as Record<string, string | undefined>;
+  const body = (req.body || {}) as VideoBody & Record<string, unknown>;
   if (body.title?.trim()) existing.title = body.title.trim();
   if (body.category?.trim()) existing.category = body.category.trim();
   if (body.description !== undefined) existing.description = body.description.trim() || undefined;
@@ -562,7 +590,7 @@ export const updateVideo = async (req: Request, res: Response) => {
   const link = (body.embedUrl || body.youtubeUrl || body.url || '').trim();
   if (existing.type === 'embed' && link) {
     const parsed = parseVideoLink(link);
-    if (!parsed) return res.status(400).json({ error: 'Invalid video link' });
+    if (!parsed) return res.status(400).json({ error: 'invalid_video_link', message: 'সঠিক ইউটিউব/ভিমিও লিঙ্ক দিন।' });
     existing.embedUrl = parsed.embedUrl;
     existing.watchUrl = parsed.watchUrl;
     existing.provider = parsed.provider;
@@ -570,18 +598,29 @@ export const updateVideo = async (req: Request, res: Response) => {
     if (parsed.thumbnail && !body.thumbnail) existing.thumbnail = parsed.thumbnail;
   }
 
-  const thumbnailFile = pickFile(req, ['thumbnail', 'thumbnailFile', 'poster']);
-  if (thumbnailFile) {
-    const storedThumb = await storeFile(thumbnailFile.path, { folder: 'vdo_bogura/thumbnails' });
-    existing.thumbnail = storedThumb.url;
-  } else if (body.thumbnail?.trim()) {
-    existing.thumbnail = body.thumbnail.trim();
+  const poster = readAsset(body, 'thumbnail');
+  const previousPoster = existing.thumbnailPublicId
+    ? { url: existing.thumbnail, publicId: existing.thumbnailPublicId }
+    : null;
+  if (poster) {
+    existing.thumbnail = poster.url;
+    existing.thumbnailPublicId = poster.publicId;
   }
 
   persistStore();
+
+  if (poster && previousPoster && poster.url !== previousPoster.url) {
+    await releaseAsset(previousPoster, (url) => memoryStore.videos.some((v) => v.id !== id && v.thumbnail === url));
+  }
+
   res.json(existing);
 };
 
+/**
+ * Legacy helper for files uploaded before the Cloudinary migration: records that
+ * still point at a local /uploads path are streamed from disk (remote assets are
+ * served by Cloudinary itself, so the browser is simply redirected there).
+ */
 export const streamVideo = (req: Request, res: Response) => {
   const { id } = req.params;
   const video = memoryStore.videos.find((v) => v.id === id);
@@ -589,8 +628,6 @@ export const streamVideo = (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Uploaded video not found' });
   }
 
-  // Cloudinary (or any remote) asset → hand the browser the CDN URL directly;
-  // Cloudinary already serves HTTP range requests for smooth seeking.
   if (/^https?:\/\//i.test(video.filePath)) {
     return res.redirect(302, video.filePath);
   }
@@ -611,23 +648,18 @@ export const streamVideo = (req: Request, res: Response) => {
     const chunksize = end - start + 1;
     const file = fs.createReadStream(absolutePath, { start, end });
 
-    const head = {
+    res.writeHead(206, {
       'Content-Range': `bytes ${start}-${end}/${fileSize}`,
       'Accept-Ranges': 'bytes',
       'Content-Length': chunksize,
       'Content-Type': 'video/mp4',
-    };
-
-    res.writeHead(206, head);
+    });
     file.pipe(res);
-  } else {
-    const head = {
-      'Content-Length': fileSize,
-      'Content-Type': 'video/mp4',
-    };
-    res.writeHead(200, head);
-    fs.createReadStream(absolutePath).pipe(res);
+    return;
   }
+
+  res.writeHead(200, { 'Content-Length': fileSize, 'Content-Type': 'video/mp4' });
+  fs.createReadStream(absolutePath).pipe(res);
 };
 
 export const deleteVideo = async (req: Request, res: Response) => {
@@ -636,17 +668,20 @@ export const deleteVideo = async (req: Request, res: Response) => {
   memoryStore.videos = memoryStore.videos.filter((v) => v.id !== id);
   persistStore();
 
-  // Best-effort cleanup of the stored asset so deleted videos stop billing.
   if (target?.type === 'upload' && target.filePath) {
-    if (target.storage === 'cloudinary' && target.publicId) {
-      await destroyCloudinaryAsset(target.publicId, 'video');
+    if (target.publicId) {
+      await deleteAsset(target.publicId, target.storage === 'local' ? undefined : 'video');
     } else if (!/^https?:\/\//i.test(target.filePath)) {
+      // Legacy record still living on the server disk.
       try {
         const abs = path.join(process.cwd(), target.filePath.replace(/^\//, ''));
         if (fs.existsSync(abs)) fs.unlinkSync(abs);
       } catch {
         /* ignore */
       }
+    }
+    if (target.thumbnailPublicId) {
+      await releaseAsset({ url: target.thumbnail, publicId: target.thumbnailPublicId, resourceType: 'image' });
     }
   }
 
@@ -668,19 +703,19 @@ export const getNotices = (req: Request, res: Response) => {
 };
 
 export const createNotice = async (req: Request, res: Response) => {
-  let pdfFile = req.body.pdfFile;
-  if (req.file) {
-    pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/notices');
-  }
-  if (!requireFields(res, { title: req.body.title, pdfFile })) return;
+  const pdf = readAsset(req.body, 'pdfFile');
+  if (!requireFields(res, { title: req.body.title })) return;
+  const asset = assetOr(res, pdf, 'নোটিশের PDF ফাইল');
+  if (!asset) return;
 
   const newNotice: Notice = {
     id: 'not-' + Date.now(),
     title: req.body.title,
-    pdfFile,
+    pdfFile: asset.url,
+    pdfFilePublicId: asset.publicId,
     publishedAt: req.body.publishedAt || new Date().toISOString(),
     expiryDate: req.body.expiryDate || undefined,
-    isActive: req.body.isActive !== 'false',
+    isActive: toBool(req.body.isActive, true),
     referenceNo: req.body.referenceNo || '',
   };
   memoryStore.notices.unshift(newNotice);
@@ -693,25 +728,45 @@ export const updateNotice = async (req: Request, res: Response) => {
   const index = memoryStore.notices.findIndex((n) => n.id === id);
   if (index === -1) return res.status(404).json({ error: 'Notice not found' });
 
-  if (req.file) {
-    req.body.pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/notices');
+  const previous = memoryStore.notices[index];
+  const pdf = readAsset(req.body, 'pdfFile');
+  const keep = <T>(value: unknown, fallback: T): T => (value === undefined ? fallback : (value as T));
+
+  const next: Notice = {
+    ...previous,
+    title: keep(req.body.title, previous.title),
+    referenceNo: keep(req.body.referenceNo, previous.referenceNo),
+    publishedAt: keep(req.body.publishedAt, previous.publishedAt),
+    expiryDate: req.body.expiryDate === '' ? undefined : keep(req.body.expiryDate, previous.expiryDate),
+    isActive: toBool(req.body.isActive, previous.isActive),
+    ...(pdf
+      ? { pdfFile: pdf.url, pdfFilePublicId: pdf.publicId }
+      : { pdfFile: previous.pdfFile, pdfFilePublicId: previous.pdfFilePublicId }),
+    id,
+  };
+
+  memoryStore.notices[index] = next;
+  persistStore();
+
+  if (pdf && pdf.url !== previous.pdfFile) {
+    await releaseAsset({ url: previous.pdfFile, publicId: previous.pdfFilePublicId }, (url) =>
+      memoryStore.notices.some((notice) => notice.id !== id && notice.pdfFile === url)
+    );
   }
 
-  memoryStore.notices[index] = {
-    ...memoryStore.notices[index],
-    ...req.body,
-    id,
-    isActive:
-      req.body.isActive !== undefined ? Boolean(req.body.isActive) : memoryStore.notices[index].isActive,
-  };
-  persistStore();
-  res.json(memoryStore.notices[index]);
+  res.json(next);
 };
 
-export const deleteNotice = (req: Request, res: Response) => {
+export const deleteNotice = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.notices.find((n) => n.id === id);
   memoryStore.notices = memoryStore.notices.filter((n) => n.id !== id);
   persistStore();
+  if (target) {
+    await releaseAsset({ url: target.pdfFile, publicId: target.pdfFilePublicId }, (url) =>
+      memoryStore.notices.some((notice) => notice.pdfFile === url)
+    );
+  }
   res.json({ message: 'Notice deleted' });
 };
 
@@ -726,31 +781,26 @@ export const getPublications = (req: Request, res: Response) => {
   res.json(list);
 };
 
+const PUBLICATION_TYPES = ['annual_report', 'newsletter', 'report'] as const;
+
 export const createPublication = async (req: Request, res: Response) => {
-  let pdfFile = req.body.pdfFile;
-  let thumbnail = req.body.thumbnail;
-
-  if (req.files && typeof req.files === 'object') {
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    if (files['pdfFile']?.[0]) {
-      pdfFile = await uploadToCloudinary(files['pdfFile'][0].path, 'vdo_bogura/publications');
-    }
-    if (files['thumbnail']?.[0]) {
-      thumbnail = await uploadToCloudinary(files['thumbnail'][0].path, 'vdo_bogura/publications');
-    }
-  } else if (req.file) {
-    pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/publications');
-  }
-
-  if (!requireFields(res, { title: req.body.title, pdfFile })) return;
+  const pdf = readAsset(req.body, 'pdfFile');
+  const cover = readAsset(req.body, 'thumbnail');
+  if (!requireFields(res, { title: req.body.title })) return;
+  const asset = assetOr(res, pdf, 'প্রকাশনার PDF ফাইল');
+  if (!asset) return;
 
   const newPub: Publication = {
     id: 'pub-' + Date.now(),
     title: req.body.title,
-    type: req.body.type || 'annual_report',
-    pdfFile,
+    type: (PUBLICATION_TYPES as readonly string[]).includes(req.body.type)
+      ? (req.body.type as Publication['type'])
+      : 'annual_report',
+    pdfFile: asset.url,
+    pdfFilePublicId: asset.publicId,
     year: Number(req.body.year || new Date().getFullYear()),
-    thumbnail: thumbnail || '',
+    thumbnail: cover?.url || '',
+    thumbnailPublicId: cover?.publicId,
   };
   memoryStore.publications.unshift(newPub);
   persistStore();
@@ -762,24 +812,57 @@ export const updatePublication = async (req: Request, res: Response) => {
   const index = memoryStore.publications.findIndex((p) => p.id === id);
   if (index === -1) return res.status(404).json({ error: 'Publication not found' });
 
-  if (req.file) {
-    req.body.pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/publications');
+  const previous = memoryStore.publications[index];
+  const pdf = readAsset(req.body, 'pdfFile');
+  const cover = readAsset(req.body, 'thumbnail');
+  const keep = <T>(value: unknown, fallback: T): T => (value === undefined ? fallback : (value as T));
+
+  const next: Publication = {
+    ...previous,
+    title: keep(req.body.title, previous.title),
+    year: Number(req.body.year ?? previous.year),
+    type: (PUBLICATION_TYPES as readonly string[]).includes(req.body.type)
+      ? (req.body.type as Publication['type'])
+      : previous.type,
+    ...(pdf
+      ? { pdfFile: pdf.url, pdfFilePublicId: pdf.publicId }
+      : { pdfFile: previous.pdfFile, pdfFilePublicId: previous.pdfFilePublicId }),
+    ...(cover ? { thumbnail: cover.url, thumbnailPublicId: cover.publicId } : {}),
+    id,
+  };
+
+  memoryStore.publications[index] = next;
+  persistStore();
+
+  if (pdf && pdf.url !== previous.pdfFile) {
+    await releaseAsset({ url: previous.pdfFile, publicId: previous.pdfFilePublicId }, (url) =>
+      memoryStore.publications.some((pub) => pub.id !== id && pub.pdfFile === url)
+    );
+  }
+  if (cover && previous.thumbnail && cover.url !== previous.thumbnail) {
+    await releaseAsset({ url: previous.thumbnail, publicId: previous.thumbnailPublicId }, (url) =>
+      memoryStore.publications.some((pub) => pub.id !== id && pub.thumbnail === url)
+    );
   }
 
-  memoryStore.publications[index] = {
-    ...memoryStore.publications[index],
-    ...req.body,
-    id,
-    year: Number(req.body.year ?? memoryStore.publications[index].year),
-  };
-  persistStore();
-  res.json(memoryStore.publications[index]);
+  res.json(next);
 };
 
-export const deletePublication = (req: Request, res: Response) => {
+export const deletePublication = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.publications.find((p) => p.id === id);
   memoryStore.publications = memoryStore.publications.filter((p) => p.id !== id);
   persistStore();
+  if (target) {
+    await releaseAsset({ url: target.pdfFile, publicId: target.pdfFilePublicId }, (url) =>
+      memoryStore.publications.some((pub) => pub.pdfFile === url)
+    );
+    if (target.thumbnail) {
+      await releaseAsset({ url: target.thumbnail, publicId: target.thumbnailPublicId }, (url) =>
+        memoryStore.publications.some((pub) => pub.thumbnail === url)
+      );
+    }
+  }
   res.json({ message: 'Publication deleted' });
 };
 
@@ -821,56 +904,73 @@ export const getAlbums = (_req: Request, res: Response) => {
   res.json(memoryStore.galleryAlbums.map(galleryAlbumResponse));
 };
 
+/**
+ * Gallery pictures are uploaded one by one through /api/uploads/image, so an
+ * "album create" request is pure JSON: the title plus the assets that already
+ * live in Cloudinary.
+ */
+const galleryAssetsFromBody = (
+  req: Request,
+  res: Response,
+  key: string
+): AssetRef[] | null => {
+  const raw = req.body?.[key];
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  if (!list.length) return [];
+  const assets = readAssetList(req.body, key, MAX_GALLERY_PHOTOS);
+  if (assets.length !== list.length) {
+    res.status(400).json({
+      error: 'invalid_image_urls',
+      message: 'একটি বা একাধিক ছবির ঠিকানা সঠিক নয়। ছবিগুলো আবার আপলোড করে তারপর সেভ করুন।',
+    });
+    return null;
+  }
+  return assets;
+};
+
+const galleryCaption = (body: Record<string, unknown>, index: number, fallback: string) => {
+  const captions = Array.isArray(body.captions) ? (body.captions as unknown[]) : [];
+  const own = cleanGalleryText(captions[index]);
+  if (own) return own.slice(0, 300);
+  const shared = cleanGalleryText(body.caption);
+  if (shared) return shared.slice(0, 300);
+  return fallback;
+};
+
+const photoRecord = (albumId: string, asset: AssetRef, caption: string): GalleryPhoto => ({
+  id: uniqueGalleryId('p'),
+  albumId,
+  image: asset.url,
+  publicId: asset.publicId,
+  storage: 'cloudinary',
+  caption,
+  uploadedAt: new Date().toISOString(),
+});
+
 export const createAlbum = async (req: Request, res: Response) => {
-  const filesByField = (req.files || {}) as Record<string, Express.Multer.File[]>;
-  const allFiles = uploadedFiles(req.files as Record<string, Express.Multer.File[]> | undefined);
   const title = cleanGalleryText(req.body.title);
   const description = cleanGalleryText(req.body.description);
-  const caption = cleanGalleryText(req.body.caption);
+  if (rejectGalleryText(res, { title, description })) return;
 
-  if (rejectGalleryText(res, { title, description, caption })) {
-    removeUploadedFiles(allFiles);
-    return;
-  }
-  if (allFiles.some((file) => !hasValidImageSignature(file))) {
-    removeUploadedFiles(allFiles);
-    return res.status(400).json({
-      error: 'invalid_image_content',
-      message: 'একটি বা একাধিক ফাইল সঠিক ইমেজ নয়। JPG, PNG, WEBP অথবা GIF ছবি দিন।',
-    });
-  }
-
-  // `coverImage` remains supported for older admin builds. The current UI
-  // sends initial album photos as `photos` and the first photo becomes cover.
-  const explicitCoverFile = filesByField.coverImage?.[0] || req.file;
-  const photoFiles = filesByField.photos || [];
-  const [storedCover, storedPhotos] = await Promise.all([
-    explicitCoverFile ? storeGalleryImage(explicitCoverFile) : Promise.resolve(null),
-    Promise.all(photoFiles.map(storeGalleryImage)),
-  ]);
-  const cover = storedCover || storedPhotos[0] || null;
+  const photos = galleryAssetsFromBody(req, res, 'photos');
+  if (!photos) return;
+  const cover = readAsset(req.body, 'cover') || photos[0] || null;
 
   const newAlbum: GalleryAlbum = {
     id: uniqueGalleryId('alb'),
     title,
     coverImage: cover?.url || '',
     coverPublicId: cover?.publicId,
-    coverStorage: cover?.storage,
+    coverStorage: cover ? 'cloudinary' : undefined,
     description,
     createdAt: new Date().toISOString(),
   };
 
-  const createdPhotos: GalleryPhoto[] = storedPhotos.map((stored, index) => ({
-    id: uniqueGalleryId('p'),
-    albumId: newAlbum.id,
-    image: stored.url,
-    publicId: stored.publicId,
-    storage: stored.storage,
-    caption: caption || (storedPhotos.length > 1 ? `${title} — ${index + 1}` : title),
-    uploadedAt: new Date().toISOString(),
-  }));
+  const createdPhotos: GalleryPhoto[] = photos.map((asset, index) =>
+    photoRecord(newAlbum.id, asset, galleryCaption(req.body, index, photos.length > 1 ? `${title} — ${index + 1}` : title))
+  );
 
-  // Album + initial photos are committed together, preventing orphan records.
+  // Album + its pictures are committed together, preventing orphan records.
   memoryStore.galleryAlbums.unshift(newAlbum);
   memoryStore.galleryPhotos.push(...createdPhotos);
   persistStore();
@@ -880,34 +980,20 @@ export const createAlbum = async (req: Request, res: Response) => {
 export const updateAlbum = async (req: Request, res: Response) => {
   const { id } = req.params;
   const index = memoryStore.galleryAlbums.findIndex((album) => album.id === id);
-  if (index === -1) {
-    if (req.file) removeUploadedFiles([req.file]);
-    return res.status(404).json({ error: 'album_not_found', message: 'অ্যালবামটি পাওয়া যায়নি।' });
-  }
+  if (index === -1) return res.status(404).json({ error: 'album_not_found', message: 'অ্যালবামটি পাওয়া যায়নি।' });
 
   const title = cleanGalleryText(req.body.title);
   const description = cleanGalleryText(req.body.description);
-  if (rejectGalleryText(res, { title, description })) {
-    if (req.file) removeUploadedFiles([req.file]);
-    return;
-  }
-  if (req.file && !hasValidImageSignature(req.file)) {
-    removeUploadedFiles([req.file]);
-    return res.status(400).json({ error: 'invalid_image_content', message: 'নির্বাচিত ফাইলটি সঠিক ইমেজ নয়।' });
-  }
+  if (rejectGalleryText(res, { title, description })) return;
 
   const oldAlbum = memoryStore.galleryAlbums[index];
-  const storedCover = req.file ? await storeGalleryImage(req.file) : null;
+  const cover = readAsset(req.body, 'cover');
   const updatedAlbum: GalleryAlbum = {
     ...oldAlbum,
     title,
     description,
-    ...(storedCover
-      ? {
-          coverImage: storedCover.url,
-          coverPublicId: storedCover.publicId,
-          coverStorage: storedCover.storage,
-        }
+    ...(cover
+      ? { coverImage: cover.url, coverPublicId: cover.publicId, coverStorage: 'cloudinary' as const }
       : {}),
     id,
   };
@@ -916,17 +1002,13 @@ export const updateAlbum = async (req: Request, res: Response) => {
   persistStore();
 
   // Do not remove a previous cover that is also one of the album's photos.
-  if (
-    storedCover &&
-    oldAlbum.coverImage &&
-    oldAlbum.coverImage !== storedCover.url &&
-    !memoryStore.galleryPhotos.some((photo) => photo.image === oldAlbum.coverImage)
-  ) {
-    await removeGalleryImage({
-      image: oldAlbum.coverImage,
-      publicId: oldAlbum.coverPublicId,
-      storage: oldAlbum.coverStorage,
-    });
+  if (cover && oldAlbum.coverImage && oldAlbum.coverImage !== cover.url) {
+    await releaseAsset(
+      { url: oldAlbum.coverImage, publicId: oldAlbum.coverPublicId, resourceType: 'image' },
+      (url) =>
+        memoryStore.galleryPhotos.some((photo) => photo.image === url) ||
+        memoryStore.galleryAlbums.some((album) => album.id !== id && album.coverImage === url)
+    );
   }
 
   res.json(galleryAlbumResponse(updatedAlbum));
@@ -942,26 +1024,27 @@ export const deleteAlbum = async (req: Request, res: Response) => {
   memoryStore.galleryPhotos = memoryStore.galleryPhotos.filter((photo) => photo.albumId !== id);
   persistStore();
 
-  // Remove each unique physical file once. A legacy URL still referenced by
+  // Remove each unique Cloudinary asset once. A URL still referenced by
   // another album/photo is deliberately retained.
-  const uniqueAssets = new Map<string, { image: string; publicId?: string; storage?: 'cloudinary' | 'local' }>();
-  uniqueAssets.set(album.coverImage, {
-    image: album.coverImage,
-    publicId: album.coverPublicId,
-    storage: album.coverStorage,
-  });
+  const uniqueAssets = new Map<string, AssetRef>();
+  if (album.coverImage) {
+    uniqueAssets.set(album.coverImage, { url: album.coverImage, publicId: album.coverPublicId, resourceType: 'image' });
+  }
   albumPhotos.forEach((photo) => {
-    uniqueAssets.set(photo.image, { image: photo.image, publicId: photo.publicId, storage: photo.storage });
+    if (photo.image) {
+      uniqueAssets.set(photo.image, { url: photo.image, publicId: photo.publicId, resourceType: 'image' });
+    }
   });
+
   await Promise.all(
     [...uniqueAssets.values()]
       .filter(
         (asset) =>
-          asset.image &&
-          !memoryStore.galleryAlbums.some((item) => item.coverImage === asset.image) &&
-          !memoryStore.galleryPhotos.some((photo) => photo.image === asset.image)
+          asset.url &&
+          !memoryStore.galleryAlbums.some((item) => item.coverImage === asset.url) &&
+          !memoryStore.galleryPhotos.some((photo) => photo.image === asset.url)
       )
-      .map(removeGalleryImage)
+      .map((asset) => releaseAsset(asset))
   );
 
   res.json({ message: 'Album and its photos deleted' });
@@ -979,57 +1062,46 @@ export const getAllPhotos = (_req: Request, res: Response) => {
   res.json(memoryStore.galleryPhotos);
 };
 
+/**
+ * Add already-uploaded pictures to an open album:
+ * `{ photos: [{ url, publicId, caption? }], caption? }`.
+ */
 export const addPhoto = async (req: Request, res: Response) => {
   const albumId = req.params.id;
-  const files = uploadedFiles(req.files as Record<string, Express.Multer.File[]> | Express.Multer.File[] | undefined);
   const albumIndex = memoryStore.galleryAlbums.findIndex((album) => album.id === albumId);
   const caption = cleanGalleryText(req.body.caption);
 
   if (albumIndex === -1) {
-    removeUploadedFiles(files);
     return res.status(404).json({ error: 'album_not_found', message: 'অ্যালবামটি পাওয়া যায়নি।' });
   }
-  if (rejectGalleryText(res, { caption })) {
-    removeUploadedFiles(files);
-    return;
-  }
-  if (files.length === 0) {
+  if (rejectGalleryText(res, { caption })) return;
+
+  const photos = galleryAssetsFromBody(req, res, 'photos') || galleryAssetsFromBody(req, res, 'images');
+  if (!photos) return;
+  if (photos.length === 0) {
     return res.status(400).json({ error: 'no_images', message: 'আপলোড করার জন্য অন্তত একটি ছবি নির্বাচন করুন।' });
   }
-  if (files.length > MAX_GALLERY_FILES) {
-    removeUploadedFiles(files);
-    return res.status(400).json({
-      error: 'too_many_images',
-      message: `একবারে সর্বোচ্চ ${MAX_GALLERY_FILES}টি ছবি আপলোড করা যাবে।`,
-    });
-  }
-  if (files.some((file) => !hasValidImageSignature(file))) {
-    removeUploadedFiles(files);
-    return res.status(400).json({
-      error: 'invalid_image_content',
-      message: 'একটি বা একাধিক ফাইল সঠিক ইমেজ নয়। JPG, PNG, WEBP অথবা GIF ছবি দিন।',
-    });
-  }
 
-  const storedImages = await Promise.all(files.map(storeGalleryImage));
-  const createdPhotos: GalleryPhoto[] = storedImages.map((stored, index) => ({
-    id: uniqueGalleryId('p'),
-    albumId,
-    image: stored.url,
-    publicId: stored.publicId,
-    storage: stored.storage,
-    caption: caption || (storedImages.length > 1 ? `${memoryStore.galleryAlbums[albumIndex].title} — ${index + 1}` : ''),
-    uploadedAt: new Date().toISOString(),
-  }));
+  const album = memoryStore.galleryAlbums[albumIndex];
+  const createdPhotos: GalleryPhoto[] = photos.map((asset, index) =>
+    photoRecord(
+      albumId,
+      asset,
+      galleryCaption(
+        req.body,
+        index,
+        photos.length > 1 ? `${album.title} — ${index + 1}` : ''
+      )
+    )
+  );
 
   memoryStore.galleryPhotos.push(...createdPhotos);
-  const album = memoryStore.galleryAlbums[albumIndex];
   if (!album.coverImage) {
     memoryStore.galleryAlbums[albumIndex] = {
       ...album,
       coverImage: createdPhotos[0].image,
       coverPublicId: createdPhotos[0].publicId,
-      coverStorage: createdPhotos[0].storage,
+      coverStorage: 'cloudinary',
     };
   }
   persistStore();
@@ -1069,7 +1141,9 @@ export const deletePhoto = async (req: Request, res: Response) => {
   const stillReferenced =
     memoryStore.galleryPhotos.some((item) => item.image === photo.image) ||
     memoryStore.galleryAlbums.some((album) => album.coverImage === photo.image);
-  if (!stillReferenced) await removeGalleryImage(photo);
+  if (!stillReferenced) {
+    await releaseAsset({ url: photo.image, publicId: photo.publicId, resourceType: 'image' });
+  }
   res.json({ message: 'Photo deleted' });
 };
 
@@ -1084,19 +1158,23 @@ export const getCommittee = (req: Request, res: Response) => {
   res.json(list);
 };
 
+const COMMITTEE_TYPES = ['general', 'executive', 'advisory', 'leadership'] as const;
+
 export const createCommitteeMember = async (req: Request, res: Response) => {
-  let photo = req.body.photo;
-  if (req.file) {
-    photo = await uploadToCloudinary(req.file.path, 'vdo_bogura/committee');
-  }
-  if (!requireFields(res, { name: req.body.name, designation: req.body.designation, photo })) return;
+  const photo = readAsset(req.body, 'photo');
+  if (!requireFields(res, { name: req.body.name, designation: req.body.designation })) return;
+  const asset = assetOr(res, photo, 'সদস্যের ছবি');
+  if (!asset) return;
 
   const newMember: CommitteeMember = {
     id: 'com-' + Date.now(),
     name: req.body.name,
     designation: req.body.designation,
-    type: req.body.type || 'executive',
-    photo,
+    type: (COMMITTEE_TYPES as readonly string[]).includes(req.body.type)
+      ? (req.body.type as CommitteeMember['type'])
+      : 'executive',
+    photo: asset.url,
+    photoPublicId: asset.publicId,
     bio: req.body.bio || '',
     order: memoryStore.committee.length + 1,
     email: req.body.email,
@@ -1112,23 +1190,47 @@ export const updateCommitteeMember = async (req: Request, res: Response) => {
   const index = memoryStore.committee.findIndex((c) => c.id === id);
   if (index === -1) return res.status(404).json({ error: 'Committee member not found' });
 
-  if (req.file) {
-    req.body.photo = await uploadToCloudinary(req.file.path, 'vdo_bogura/committee');
-  }
+  const previous = memoryStore.committee[index];
+  const photo = readAsset(req.body, 'photo');
+  const keep = <T>(value: unknown, fallback: T): T => (value === undefined ? fallback : (value as T));
 
-  memoryStore.committee[index] = {
-    ...memoryStore.committee[index],
-    ...req.body,
+  const next: CommitteeMember = {
+    ...previous,
+    name: keep(req.body.name, previous.name),
+    designation: keep(req.body.designation, previous.designation),
+    bio: keep(req.body.bio, previous.bio),
+    email: keep(req.body.email, previous.email),
+    phone: keep(req.body.phone, previous.phone),
+    order: req.body.order !== undefined ? Number(req.body.order) : previous.order,
+    type: (COMMITTEE_TYPES as readonly string[]).includes(req.body.type)
+      ? (req.body.type as CommitteeMember['type'])
+      : previous.type,
+    ...(photo ? { photo: photo.url, photoPublicId: photo.publicId } : {}),
     id,
   };
+
+  memoryStore.committee[index] = next;
   persistStore();
-  res.json(memoryStore.committee[index]);
+
+  if (photo && photo.url !== previous.photo) {
+    await releaseAsset({ url: previous.photo, publicId: previous.photoPublicId }, (url) =>
+      memoryStore.committee.some((member) => member.id !== id && member.photo === url)
+    );
+  }
+
+  res.json(next);
 };
 
-export const deleteCommitteeMember = (req: Request, res: Response) => {
+export const deleteCommitteeMember = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.committee.find((c) => c.id === id);
   memoryStore.committee = memoryStore.committee.filter((c) => c.id !== id);
   persistStore();
+  if (target) {
+    await releaseAsset({ url: target.photo, publicId: target.photoPublicId }, (url) =>
+      memoryStore.committee.some((member) => member.photo === url)
+    );
+  }
   res.json({ message: 'Member removed' });
 };
 
@@ -1138,16 +1240,16 @@ export const getPartners = (req: Request, res: Response) => {
 };
 
 export const createPartner = async (req: Request, res: Response) => {
-  let logo = req.body.logo;
-  if (req.file) {
-    logo = await uploadToCloudinary(req.file.path, 'vdo_bogura/partners');
-  }
-  if (!requireFields(res, { name: req.body.name, logo })) return;
+  const logo = readAsset(req.body, 'logo');
+  if (!requireFields(res, { name: req.body.name })) return;
+  const asset = assetOr(res, logo, 'পার্টনারের লোগো');
+  if (!asset) return;
 
   const newPartner: Partner = {
     id: 'part-' + Date.now(),
     name: req.body.name,
-    logo,
+    logo: asset.url,
+    logoPublicId: asset.publicId,
     websiteUrl: req.body.websiteUrl || '',
   };
   memoryStore.partners.push(newPartner);
@@ -1160,23 +1262,40 @@ export const updatePartner = async (req: Request, res: Response) => {
   const index = memoryStore.partners.findIndex((p) => p.id === id);
   if (index === -1) return res.status(404).json({ error: 'Partner not found' });
 
-  if (req.file) {
-    req.body.logo = await uploadToCloudinary(req.file.path, 'vdo_bogura/partners');
-  }
+  const previous = memoryStore.partners[index];
+  const logo = readAsset(req.body, 'logo');
+  const keep = <T>(value: unknown, fallback: T): T => (value === undefined ? fallback : (value as T));
 
-  memoryStore.partners[index] = {
-    ...memoryStore.partners[index],
-    ...req.body,
+  const next: Partner = {
+    ...previous,
+    name: keep(req.body.name, previous.name),
+    websiteUrl: keep(req.body.websiteUrl, previous.websiteUrl),
+    ...(logo ? { logo: logo.url, logoPublicId: logo.publicId } : {}),
     id,
   };
+
+  memoryStore.partners[index] = next;
   persistStore();
-  res.json(memoryStore.partners[index]);
+
+  if (logo && logo.url !== previous.logo) {
+    await releaseAsset({ url: previous.logo, publicId: previous.logoPublicId }, (url) =>
+      memoryStore.partners.some((partner) => partner.id !== id && partner.logo === url)
+    );
+  }
+
+  res.json(next);
 };
 
-export const deletePartner = (req: Request, res: Response) => {
+export const deletePartner = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.partners.find((p) => p.id === id);
   memoryStore.partners = memoryStore.partners.filter((p) => p.id !== id);
   persistStore();
+  if (target) {
+    await releaseAsset({ url: target.logo, publicId: target.logoPublicId }, (url) =>
+      memoryStore.partners.some((partner) => partner.logo === url)
+    );
+  }
   res.json({ message: 'Partner removed' });
 };
 
@@ -1195,16 +1314,15 @@ export const getCareers = (req: Request, res: Response) => {
 };
 
 export const createCareer = async (req: Request, res: Response) => {
-  let pdfFile = req.body.pdfFile;
-  if (req.file) {
-    pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/careers');
-  }
   if (!requireFields(res, {
     title: req.body.title,
     deadline: req.body.deadline,
     description: req.body.description,
     location: req.body.location,
   })) return;
+
+  const pdf = optionalAsset(res, req.body, 'pdfFile', 'বিজ্ঞপ্তির PDF');
+  if (!pdf.ok) return;
 
   const newCircular: CareerCircular = {
     id: 'car-' + Date.now(),
@@ -1213,8 +1331,9 @@ export const createCareer = async (req: Request, res: Response) => {
     description: req.body.description,
     location: req.body.location,
     vacancy: Number(req.body.vacancy || 1),
-    pdfFile,
-    isActive: true,
+    pdfFile: pdf.asset?.url,
+    pdfFilePublicId: pdf.asset?.publicId,
+    isActive: toBool(req.body.isActive, true),
     createdAt: new Date().toISOString(),
   };
   memoryStore.careers.unshift(newCircular);
@@ -1227,42 +1346,68 @@ export const updateCareer = async (req: Request, res: Response) => {
   const index = memoryStore.careers.findIndex((c) => c.id === id);
   if (index === -1) return res.status(404).json({ error: 'Career circular not found' });
 
-  if (req.file) {
-    req.body.pdfFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/careers');
+  const previous = memoryStore.careers[index];
+  const pdf = optionalAsset(res, req.body, 'pdfFile', 'বিজ্ঞপ্তির PDF');
+  if (!pdf.ok) return;
+
+  const keep = <T>(value: unknown, fallback: T): T => (value === undefined ? fallback : (value as T));
+  const next: CareerCircular = {
+    ...previous,
+    title: keep(req.body.title, previous.title),
+    deadline: keep(req.body.deadline, previous.deadline),
+    description: keep(req.body.description, previous.description),
+    location: keep(req.body.location, previous.location),
+    vacancy: Number(req.body.vacancy ?? previous.vacancy),
+    isActive: toBool(req.body.isActive, previous.isActive),
+    ...(pdf.asset
+      ? { pdfFile: pdf.asset.url, pdfFilePublicId: pdf.asset.publicId }
+      : 'pdfFile' in req.body
+        ? { pdfFile: undefined, pdfFilePublicId: undefined }
+        : {}),
+    id,
+  };
+
+  memoryStore.careers[index] = next;
+  persistStore();
+
+  if (pdf.asset && pdf.asset.url !== previous.pdfFile) {
+    await releaseAsset({ url: previous.pdfFile, publicId: previous.pdfFilePublicId }, (url) =>
+      memoryStore.careers.some((circular) => circular.id !== id && circular.pdfFile === url)
+    );
   }
 
-  memoryStore.careers[index] = {
-    ...memoryStore.careers[index],
-    ...req.body,
-    id,
-    vacancy: Number(req.body.vacancy ?? memoryStore.careers[index].vacancy),
-    isActive:
-      req.body.isActive !== undefined ? Boolean(req.body.isActive) : memoryStore.careers[index].isActive,
-  };
-  persistStore();
-  res.json(memoryStore.careers[index]);
+  res.json(next);
 };
 
-export const deleteCareer = (req: Request, res: Response) => {
+export const deleteCareer = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.careers.find((c) => c.id === id);
   memoryStore.careers = memoryStore.careers.filter((c) => c.id !== id);
   persistStore();
+  if (target?.pdfFile) {
+    await releaseAsset({ url: target.pdfFile, publicId: target.pdfFilePublicId }, (url) =>
+      memoryStore.careers.some((circular) => circular.pdfFile === url)
+    );
+  }
   res.json({ message: 'Career circular deleted' });
 };
 
+/**
+ * Public job application. The CV is uploaded first (POST /api/uploads/cv, rate
+ * limited), so this request is JSON only and carries the stored URL.
+ */
 export const applyJob = async (req: Request, res: Response) => {
-  let cvFile = req.body.cvFile;
-  if (req.file) {
-    cvFile = await uploadToCloudinary(req.file.path, 'vdo_bogura/cvs');
-  }
-
-  if (!cvFile) {
-    return res.status(400).json({ error: 'Please upload your CV (PDF file)' });
+  const cv = readAsset(req.body, 'cvFile');
+  if (!cv) {
+    return res.status(400).json({
+      error: 'missing_cv',
+      message: 'সিভি ফাইলটি আপলোড হয়নি। ফাইল বেছে নিয়ে আপলোড শেষ হওয়ার পর আবার জমা দিন।',
+    });
   }
 
   const { careerId, name, email, phone, notes } = req.body;
   if (!name || !email || !phone) {
-    return res.status(400).json({ error: 'Name, email, and phone are required' });
+    return res.status(400).json({ error: 'missing_fields', message: 'নাম, ইমেইল ও মোবাইল নম্বর আবশ্যক।' });
   }
 
   const circular = memoryStore.careers.find((c) => c.id === careerId);
@@ -1274,7 +1419,8 @@ export const applyJob = async (req: Request, res: Response) => {
     name,
     email,
     phone,
-    cvFile,
+    cvFile: cv.url,
+    cvPublicId: cv.publicId,
     notes,
     submittedAt: new Date().toISOString(),
   };
@@ -1288,10 +1434,16 @@ export const getApplications = (req: Request, res: Response) => {
   res.json(memoryStore.applications);
 };
 
-export const deleteApplication = (req: Request, res: Response) => {
+export const deleteApplication = async (req: Request, res: Response) => {
   const { id } = req.params;
+  const target = memoryStore.applications.find((a) => a.id === id);
   memoryStore.applications = memoryStore.applications.filter((a) => a.id !== id);
   persistStore();
+  if (target?.cvFile) {
+    await releaseAsset({ url: target.cvFile, publicId: target.cvPublicId }, (url) =>
+      memoryStore.applications.some((application) => application.cvFile === url)
+    );
+  }
   res.json({ message: 'Application deleted' });
 };
 
@@ -1356,9 +1508,24 @@ function parseJsonField(value: unknown): unknown {
 }
 
 export const updateSettings = async (req: Request, res: Response) => {
-  let updatedData = { ...req.body } as Record<string, unknown>;
-  if (req.file) {
-    updatedData.logoUrl = await uploadToCloudinary(req.file.path, 'vdo_bogura/settings');
+  const updatedData = { ...req.body } as Record<string, unknown>;
+
+  // The logo is either a Cloudinary reference from /api/uploads/logo or the URL
+  // the admin typed into the plain text field. An explicitly emptied field
+  // clears the logo; anything that only LOOKS like a URL but is not one is a 400.
+  const logo = readAsset(req.body, 'logoUrl') || readAsset(req.body, 'logo');
+  const cleared = 'logoUrl' in req.body && String(req.body.logoUrl ?? '').trim() === '';
+  if (logo) {
+    updatedData.logoUrl = logo.url;
+    updatedData.logoPublicId = logo.publicId;
+  } else if (cleared) {
+    updatedData.logoUrl = '';
+    updatedData.logoPublicId = undefined;
+  } else if ('logoUrl' in req.body || 'logo' in req.body) {
+    return res.status(400).json({
+      error: 'invalid_asset',
+      message: 'লোগো ছবির ঠিকানা সঠিক নয়। ছবিটি আবার আপলোড করে তারপর সেভ করুন।',
+    });
   }
 
   ['theme', 'socialLinks', 'branchAddresses', 'headerLocation', 'footerAbout', 'footerCopyright'].forEach(
@@ -1378,11 +1545,21 @@ export const updateSettings = async (req: Request, res: Response) => {
     };
   }
 
+  const previousLogo = memoryStore.settings.logoUrl;
+  const previousLogoPublicId = memoryStore.settings.logoPublicId;
+
   memoryStore.settings = {
     ...memoryStore.settings,
     ...(updatedData as Partial<SiteSettings>),
   };
   persistStore();
+
+  if (logo && previousLogo && previousLogo !== logo.url) {
+    await releaseAsset({ url: previousLogo, publicId: previousLogoPublicId }, (url) =>
+      memoryStore.settings.logoUrl === url
+    );
+  }
+
   res.json(memoryStore.settings);
 };
 

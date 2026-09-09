@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { AuthProvider } from './context/AuthContext';
 import { LanguageProvider } from './context/LanguageContext';
 import { SettingsProvider } from './context/SettingsContext';
+import { ToastProvider } from './context/ToastContext';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { ScrollToTop } from './components/ScrollToTop';
@@ -71,10 +72,12 @@ export function App() {
     <LanguageProvider>
       <SettingsProvider>
         <AuthProvider>
-          <BrowserRouter>
-            <ScrollToTop />
-            <AppShell />
-          </BrowserRouter>
+          <ToastProvider>
+            <BrowserRouter>
+              <ScrollToTop />
+              <AppShell />
+            </BrowserRouter>
+          </ToastProvider>
         </AuthProvider>
       </SettingsProvider>
     </LanguageProvider>

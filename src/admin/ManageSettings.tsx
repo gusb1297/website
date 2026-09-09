@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useFileInput } from '../hooks/useFileInput';
-import { useAuth } from '../context/AuthContext';
+import { AssetField } from '../components/admin/AssetField';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
+import type { AssetValue } from '../lib/upload';
 import { useSettings } from '../context/SettingsContext';
 import { SiteSettings, BranchOffice } from '../types';
 import { Settings, Save, CheckCircle2, Palette, Plus, Trash2, Pipette } from 'lucide-react';
-import { readApiError } from '../utils/api';
 
 const inputCls =
   'w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300 focus:outline-none focus:border-emerald-700';
@@ -114,7 +115,8 @@ const ColorField: React.FC<{ label: string; value: string; onChange: (hex: strin
 };
 
 export const ManageSettings: React.FC = () => {
-  const { token } = useAuth();
+  const toast = useToast();
+  const { run } = useSaveAction();
   const { notifySettingsUpdated } = useSettings();
   const { data: settings } = useFetch<SiteSettings>('/api/settings');
 
@@ -122,7 +124,7 @@ export const ManageSettings: React.FC = () => {
   const [orgNameEn, setOrgNameEn] = useState('');
   const [tagline, setTagline] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
-  const logoInput = useFileInput();
+  const [logoAsset, setLogoAsset] = useState<AssetValue | null>(null);
   const [establishedYear, setEstablishedYear] = useState(2010);
   const [address, setAddress] = useState('');
   const [addressEn, setAddressEn] = useState('');
@@ -153,6 +155,7 @@ export const ManageSettings: React.FC = () => {
       setOrgNameEn(settings.ngoNameEn || '');
       setTagline(settings.ngoTagline || '');
       setLogoUrl(settings.logoUrl || '');
+      setLogoAsset(settings.logoUrl ? { url: settings.logoUrl, publicId: settings.logoPublicId } : null);
       setEstablishedYear(settings.establishedYear || new Date().getFullYear());
       setAddress(settings.address || '');
       setAddressEn(settings.addressEn || '');
@@ -216,47 +219,25 @@ export const ManageSettings: React.FC = () => {
         theme: { primary: primaryColor, accent: accentColor },
       };
 
-      let res: Response;
-      // Read the file at submit time (state, falling back to the input itself)
-      // so a logo that is visibly selected is never silently skipped.
-      const logoFile = logoInput.getFile();
-      if (logoFile) {
-        const formData = new FormData();
-        Object.entries(body).forEach(([key, value]) => {
-          if (typeof value === 'object' && value !== null) {
-            formData.append(key, JSON.stringify(value));
-          } else {
-            formData.append(key, String(value));
-          }
-        });
-        // Field name must match `upload.single('logo')` on the server.
-        formData.append('logo', logoFile, logoFile.name);
-        res = await fetch('/api/settings', {
-          method: 'PUT',
-          // No Content-Type here: the browser sets multipart/form-data with the boundary.
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        });
-      } else {
-        res = await fetch('/api/settings', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(body),
-        });
+      // A freshly uploaded logo (see AssetField) always wins over the text field.
+      if (logoAsset?.url) {
+        body.logoUrl = logoAsset.url;
+        body.logoPublicId = logoAsset.publicId;
       }
 
-      if (!res.ok) throw new Error(await readApiError(res, 'সেটিংস আপডেট করা যায়নি'));
+      const saved = await run<SiteSettings>({
+        url: '/api/settings',
+        method: 'PUT',
+        body,
+        success: 'ওয়েবসাইট সেটিংস সেভ হয়েছে',
+        failure: 'সেটিংস আপডেট করা যায়নি',
+      });
+      if (!saved) return;
 
       setMsg('ওয়েবসাইট সেটিংস সফলভাবে সেভ করা হয়েছে!');
-      // Clears the native input too, so the same logo is not re-uploaded on the next save.
-      logoInput.reset();
+      setLogoAsset(null);
       // Let the public site + admin preview pick up the new values/colors.
       notifySettingsUpdated();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে: সেটিংস সেভ করা যায়নি');
     } finally {
       setSaving(false);
     }
@@ -318,18 +299,16 @@ export const ManageSettings: React.FC = () => {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">লোগো আপলোড (নতুন)</label>
-                <input
-                  ref={logoInput.inputRef}
-                  type="file"
-                  name="logo"
-                  accept="image/*"
-                  onChange={logoInput.onChange}
-                  className="w-full px-3 py-2 rounded-xl text-xs bg-white border border-slate-300"
+                <AssetField
+                  kind="logo"
+                  folder="settings"
+                  compact
+                  value={logoAsset}
+                  onChange={(asset) => {
+                  setLogoAsset(asset);
+                  setLogoUrl(asset?.url ?? '');
+                  }}
                 />
-                {logoInput.file && (
-                  <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {logoInput.file.name}</p>
-                )}
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">লোগো URL</label>

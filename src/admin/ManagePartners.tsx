@@ -1,101 +1,89 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useFileInput } from '../hooks/useFileInput';
-import { useAuth } from '../context/AuthContext';
+import { AssetField } from '../components/admin/AssetField';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
+import { uploadQueueSize } from '../lib/upload';
+import type { AssetValue } from '../lib/upload';
 import { Partner } from '../types';
 import { Handshake, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
-import { readApiError } from '../utils/api';
 
 export const ManagePartners: React.FC = () => {
-  const { token } = useAuth();
+  const toast = useToast();
+  const { saving: creating, run } = useSaveAction();
   const { data: partners, refetch } = useFetch<Partner[]>('/api/partners');
 
   const [name, setName] = useState('');
   const [websiteUrl, setWebsiteUrl] = useState('');
-  const logoInput = useFileInput();
-  const [creating, setCreating] = useState(false);
+  const [logoAsset, setLogoAsset] = useState<AssetValue | null>(null);
   const [editing, setEditing] = useState<Partner | null>(null);
   const [editName, setEditName] = useState('');
   const [editUrl, setEditUrl] = useState('');
-  const editLogoInput = useFileInput();
+  const [editLogo, setEditLogo] = useState<AssetValue | null>(null);
+
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Read the file at submit time (state, falling back to the input itself)
-    // so the FormData always carries the file the browser is showing.
-    const logoFile = logoInput.getFile();
-    if (!logoFile) {
-      alert('পার্টনারের লোগো নির্বাচন করুন।');
+    if (!name.trim()) {
+      toast.error({ title: 'পার্টনারের নাম লিখুন' });
       return;
     }
-    setCreating(true);
-    try {
-      const formData = new FormData();
-      formData.append('name', name);
-      formData.append('websiteUrl', websiteUrl);
-      // Field name must match `upload.single('logo')` on the server.
-      formData.append('logo', logoFile, logoFile.name);
-      const res = await fetch('/api/partners', {
-        method: 'POST',
-        // No Content-Type here: the browser sets multipart/form-data with the boundary.
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+    if (!logoAsset?.url && uploadQueueSize() === 0) {
+      toast.error({
+        title: 'লোগো নির্বাচন করুন',
+        description: 'লোগো বেছে নিলেই সেটি সরাসরি Cloudinary-তে আপলোড হয়ে যাবে।',
       });
-      if (!res.ok) throw new Error(await readApiError(res, 'পার্টনার যোগ করা যায়নি'));
-      setName('');
-      setWebsiteUrl('');
-      // Clears the native input too, so the next partner cannot show a stale file.
-      logoInput.reset();
-      refetch();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
-    } finally {
-      setCreating(false);
+      return;
     }
+
+    const created = await run<Partner>({
+      url: '/api/partners',
+      body: { name: name.trim(), websiteUrl: websiteUrl.trim(), logo: logoAsset },
+      success: 'পার্টনার যোগ হয়েছে',
+      failure: 'পার্টনার সংরক্ষণ করা যায়নি',
+    });
+    if (!created) return;
+
+    setName('');
+    setWebsiteUrl('');
+    setLogoAsset(null);
+    refetch();
   };
+
 
   const startEdit = (partner: Partner) => {
     setEditing(partner);
     setEditName(partner.name);
     setEditUrl(partner.websiteUrl || '');
-    editLogoInput.reset();
+    setEditLogo(partner.logo ? { url: partner.logo, publicId: partner.logoPublicId } : null);
   };
+
 
   const handleSaveEdit = async () => {
     if (!editing) return;
-    try {
-      const formData = new FormData();
-      formData.append('name', editName);
-      formData.append('websiteUrl', editUrl);
-      const editLogoFile = editLogoInput.getFile();
-      if (editLogoFile) {
-        formData.append('logo', editLogoFile, editLogoFile.name);
-      }
-      const res = await fetch(`/api/partners/${editing.id}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'পার্টনার আপডেট করা যায়নি'));
-      setEditing(null);
-      editLogoInput.reset();
-      refetch();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
-    }
+    const saved = await run<Partner>({
+      url: `/api/partners/${editing.id}`,
+      method: 'PUT',
+      body: { name: editName.trim(), websiteUrl: editUrl.trim(), logo: editLogo },
+      success: 'পার্টনার আপডেট হয়েছে',
+      failure: 'পার্টনার আপডেট করা যায়নি',
+    });
+    if (!saved) return;
+    setEditing(null);
+    setEditLogo(null);
+    refetch();
   };
+
 
   const handleDelete = async (id: string) => {
     if (!confirm('আপনি কি এই পার্টনারটি মুছে ফেলতে চান?')) return;
-    try {
-      await fetch(`/api/partners/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refetch();
-    } catch (e) {
-      console.error(e);
-    }
+    const done = await run({
+      url: `/api/partners/${id}`,
+      method: 'DELETE',
+      success: 'পার্টনার মুছে ফেলা হয়েছে',
+      failure: 'পার্টনার মুছে ফেলা যায়নি',
+    });
+    if (done !== null) refetch();
   };
 
   return (
@@ -132,19 +120,13 @@ export const ManagePartners: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">লোগো আপলোড (Direct Upload)</label>
-              <input
-                ref={logoInput.inputRef}
-                type="file"
-                name="logo"
-                required
-                accept="image/*"
-                onChange={logoInput.onChange}
-                className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
+              <AssetField
+                kind="logo"
+                folder="partners"
+                label="পার্টনারের লোগো"
+                value={logoAsset}
+                onChange={setLogoAsset}
               />
-              {logoInput.file && (
-                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {logoInput.file.name}</p>
-              )}
             </div>
 
           </div>
@@ -195,16 +177,14 @@ export const ManagePartners: React.FC = () => {
                     className="w-full px-3 py-2 rounded-lg text-xs border border-slate-300"
                     placeholder="ওয়েবসাইট URL"
                   />
-                  <input
-                    ref={editLogoInput.inputRef}
-                    type="file"
-                    name="logo"
-                    accept="image/*"
-                    onChange={editLogoInput.onChange}
-                    className="w-full px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg"
-                    title="নতুন লোগো আপলোড করুন (ঐচ্ছিক)"
+                  <AssetField
+                    kind="logo"
+                    folder="partners"
+                    compact
+                    value={editLogo}
+                    onChange={setEditLogo}
                   />
-                  <div className="flex gap-2">
+<div className="flex gap-2">
                     <button
                       onClick={handleSaveEdit}
                       className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold"

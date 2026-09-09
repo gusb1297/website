@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useFileInput } from '../hooks/useFileInput';
+import { AssetField } from '../components/admin/AssetField';
 import { useAuth } from '../context/AuthContext';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
+import type { AssetValue } from '../lib/upload';
 import { CareerCircular, Applicant } from '../types';
 import { Briefcase, Users, Download, Trash2, Mail, Phone, Edit3, X, Save } from 'lucide-react';
-import { readApiError } from '../utils/api';
 
 export const ManageCareer: React.FC = () => {
+  const toast = useToast();
   const { token } = useAuth();
+  const { saving: submitting, run } = useSaveAction();
   const { data: careers, refetch: refetchCareers } = useFetch<CareerCircular[]>('/api/career?all=true');
   const { data: applicants, refetch: refetchApplicants } = useFetch<Applicant[]>('/api/career/applications', {
     headers: { Authorization: `Bearer ${token}` },
@@ -18,8 +22,7 @@ export const ManageCareer: React.FC = () => {
   const [location, setLocation] = useState('');
   const [deadline, setDeadline] = useState('2026-12-31');
   const [description, setDescription] = useState('');
-  const pdfInput = useFileInput();
-  const [submitting, setSubmitting] = useState(false);
+  const [pdfAsset, setPdfAsset] = useState<AssetValue | null>(null);
 
   const [editing, setEditing] = useState<CareerCircular | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -28,46 +31,39 @@ export const ManageCareer: React.FC = () => {
   const [editDeadline, setEditDeadline] = useState('');
   const [editDescription, setEditDescription] = useState('');
 
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Read the file at submit time (state, falling back to the input itself)
-    // so the FormData always carries the file the browser is showing.
-    const pdfFile = pdfInput.getFile();
-    if (!pdfFile) {
-      alert('সার্কুলারের PDF ফাইল নির্বাচন করুন।');
+    if (!title.trim() || !location.trim() || !description.trim()) {
+      toast.error({ title: 'শিরোনাম, কর্মস্থল ও বিবরণ আবশ্যক' });
       return;
     }
-    setSubmitting(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('title', title);
-      formData.append('vacancy', String(vacancy));
-      formData.append('location', location);
-      formData.append('deadline', deadline);
-      formData.append('description', description);
-      // Field name must match `upload.single('pdfFile')` on the server.
-      formData.append('pdfFile', pdfFile, pdfFile.name);
-
-      const res = await fetch('/api/career', {
-        method: 'POST',
-        // No Content-Type here: the browser sets multipart/form-data with the boundary.
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error(await readApiError(res, 'নিয়োগ বিজ্ঞপ্তি সেভ করা যায়নি'));
-
-      setTitle('');
-      setDescription('');
-      // Clears the native input too, so the next circular cannot show a stale file.
-      pdfInput.reset();
-      refetchCareers();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
-    } finally {
-      setSubmitting(false);
+    if (pdfAsset && !pdfAsset.url) {
+      toast.error({ title: 'PDF ফাইলটি ঠিকভাবে আপলোড হয়নি', description: 'আবার ফাইল বেছে নিন।' });
+      return;
     }
+
+    const created = await run<CareerCircular>({
+      url: '/api/career',
+      body: {
+        title: title.trim(),
+        vacancy,
+        location: location.trim(),
+        deadline,
+        description: description.trim(),
+        isActive: true,
+        pdfFile: pdfAsset,
+      },
+      success: 'নিয়োগ বিজ্ঞপ্তি প্রকাশিত হয়েছে',
+      failure: 'বিজ্ঞপ্তি সংরক্ষণ করা যায়নি',
+    });
+    if (!created) return;
+
+    setTitle('');
+    setDescription('');
+    setLocation('');
+    setPdfAsset(null);
+    refetchCareers();
   };
 
   const startEdit = (circular: CareerCircular) => {
@@ -79,70 +75,62 @@ export const ManageCareer: React.FC = () => {
     setEditDescription(circular.description);
   };
 
+
   const handleSaveEdit = async () => {
     if (!editing) return;
-    try {
-      const formData = new FormData();
-      formData.append('title', editTitle);
-      formData.append('vacancy', String(editVacancy));
-      formData.append('location', editLocation);
-      formData.append('deadline', editDeadline);
-      formData.append('description', editDescription);
-      formData.append('isActive', String(editing.isActive));
-      // PDF kept as-is; upload new file separately if needed
-      const res = await fetch(`/api/career/${editing.id}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'বিজ্ঞপ্তি আপডেট করা যায়নি'));
-      setEditing(null);
-      refetchCareers();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
-    }
+    const saved = await run<CareerCircular>({
+      url: `/api/career/${editing.id}`,
+      method: 'PUT',
+      body: {
+        title: editTitle.trim(),
+        vacancy: editVacancy,
+        location: editLocation.trim(),
+        deadline: editDeadline,
+        description: editDescription.trim(),
+        isActive: editing.isActive,
+      },
+      success: 'বিজ্ঞপ্তি আপডেট হয়েছে',
+      failure: 'বিজ্ঞপ্তি আপডেট করা যায়নি',
+    });
+    if (!saved) return;
+    setEditing(null);
+    refetchCareers();
   };
 
+
   const toggleActive = async (circular: CareerCircular) => {
-    try {
-      await fetch(`/api/career/${circular.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ isActive: !circular.isActive }),
-      });
-      refetchCareers();
-    } catch (e) {
-      console.error(e);
-    }
+    const saved = await run<CareerCircular>({
+      url: `/api/career/${circular.id}`,
+      method: 'PUT',
+      body: { isActive: !circular.isActive },
+      success: circular.isActive ? 'বিজ্ঞপ্তি নিষ্ক্রিয় করা হয়েছে' : 'বিজ্ঞপ্তি সক্রিয় করা হয়েছে',
+      failure: 'অবস্থা পরিবর্তন করা যায়নি',
+    });
+    if (saved) refetchCareers();
   };
+
 
   const handleDelete = async (id: string) => {
     if (!confirm('আপনি কি এই বিজ্ঞপ্তিটি মুছে ফেলতে চান?')) return;
-    try {
-      await fetch(`/api/career/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refetchCareers();
-    } catch (e) {
-      console.error(e);
-    }
+    const done = await run({
+      url: `/api/career/${id}`,
+      method: 'DELETE',
+      success: 'বিজ্ঞপ্তি মুছে ফেলা হয়েছে',
+      failure: 'বিজ্ঞপ্তি মুছে ফেলা যায়নি',
+    });
+    if (done !== null) refetchCareers();
   };
+
 
   const handleDeleteApplication = async (id: string) => {
     if (!confirm('আপনি কি এই আবেদনটি মুছে ফেলতে চান?')) return;
-    try {
-      await fetch(`/api/career/applications/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refetchApplicants();
-    } catch (e) {
-      console.error(e);
-    }
+    const done = await run({
+      url: `/api/career/applications/${id}`,
+      method: 'DELETE',
+      success: 'আবেদনটি মুছে ফেলা হয়েছে',
+      failure: 'আবেদন মুছে ফেলা যায়নি',
+    });
+    if (done !== null) refetchApplicants();
   };
 
   return (
@@ -213,19 +201,13 @@ export const ManageCareer: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">অফিশিয়াল সার্কুলার পিডিএফ (PDF File)</label>
-              <input
-                ref={pdfInput.inputRef}
-                type="file"
-                name="pdfFile"
-                required
-                accept=".pdf,application/pdf"
-                onChange={pdfInput.onChange}
-                className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
+              <AssetField
+                kind="document"
+                folder="careers"
+                label="অফিশিয়াল সার্কুলার (PDF — ঐচ্ছিক)"
+                value={pdfAsset}
+                onChange={setPdfAsset}
               />
-              {pdfInput.file && (
-                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {pdfInput.file.name}</p>
-              )}
             </div>
 
           </div>

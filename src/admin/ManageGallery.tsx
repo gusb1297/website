@@ -1,12 +1,15 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useAuth } from '../context/AuthContext';
-import { GalleryAlbum, GalleryPhoto } from '../types';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
+import { AssetField } from '../components/admin/AssetField';
+import { AssetBatchField } from '../components/admin/AssetBatchField';
 import { SafeImage } from '../components/SafeImage';
+import { GalleryAlbum, GalleryPhoto } from '../types';
+import type { AssetValue } from '../lib/upload';
 import {
   AlertCircle,
   CalendarDays,
-  CheckCircle2,
   Edit3,
   Eye,
   FolderOpen,
@@ -20,127 +23,11 @@ import {
   X,
 } from 'lucide-react';
 
-const IMAGE_ACCEPT = '.jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif';
-const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-const ALLOWED_EXTENSIONS: Record<string, string[]> = {
-  'image/jpeg': ['jpg', 'jpeg'],
-  'image/png': ['png'],
-  'image/webp': ['webp'],
-  'image/gif': ['gif'],
-};
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const MAX_IMAGE_COUNT = 20;
+/** One album may hold this many pictures at a time (Cloudinary itself is unlimited). */
+const MAX_ALBUM_PHOTOS = 20;
 
 const inputClassName =
   'w-full min-w-0 rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-700 focus:bg-white focus:ring-2 focus:ring-emerald-700/15';
-
-type Notice = { kind: 'success' | 'error'; text: string };
-type GalleryAlbumCreateResponse = GalleryAlbum & { photos?: GalleryPhoto[] };
-
-class ApiRequestError extends Error {
-  status: number;
-
-  constructor(message: string, status = 0) {
-    super(message);
-    this.status = status;
-  }
-}
-
-function apiErrorMessage(status: number, responseText = '', fallback = 'অনুরোধটি সম্পন্ন করা যায়নি।') {
-  // The server's own Bengali `message` is always the most specific explanation
-  // — e.g. "অ্যাকাউন্টটি আর সক্রিয় নেই।" (account revoked) on a 401, or the
-  // Cloudinary storage hint on a 503 — so it wins over status-based guesses.
-  try {
-    const body = JSON.parse(responseText) as { message?: string };
-    if (body.message && body.message.trim()) return body.message;
-  } catch {
-    // Keep the user-friendly fallback; technical response text goes to console.
-  }
-  if (status === 401 || status === 403) return 'আপনার সেশন শেষ হয়েছে অথবা এই কাজের অনুমতি নেই। আবার লগইন করুন।';
-  if (status === 413) return 'একটি ছবি সার্ভারের নির্ধারিত আকারসীমার চেয়ে বড়। ছোট আকারের ছবি দিন।';
-  if (status >= 500) return 'সার্ভারে সাময়িক সমস্যা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।';
-  return fallback;
-}
-
-function uploadFormData<T>(
-  url: string,
-  method: 'POST' | 'PUT',
-  token: string | null,
-  formData: FormData,
-  onProgress: (progress: number) => void
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open(method, url);
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    xhr.responseType = 'text';
-
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          resolve(JSON.parse(xhr.responseText) as T);
-        } catch (error) {
-          console.error('[gallery] Invalid API response:', error);
-          reject(new ApiRequestError('সার্ভার থেকে সঠিক উত্তর পাওয়া যায়নি।', xhr.status));
-        }
-        return;
-      }
-      console.error(`[gallery] ${method} ${url} failed (${xhr.status}):`, xhr.responseText);
-      reject(new ApiRequestError(apiErrorMessage(xhr.status, xhr.responseText), xhr.status));
-    };
-    xhr.onerror = () => {
-      console.error(`[gallery] Network error while calling ${method} ${url}`);
-      reject(new ApiRequestError('নেটওয়ার্ক সমস্যা হয়েছে। ইন্টারনেট সংযোগ দেখে আবার চেষ্টা করুন।'));
-    };
-    xhr.onabort = () => reject(new ApiRequestError('আপলোডটি বাতিল হয়েছে।'));
-    xhr.send(formData);
-  });
-}
-
-function fileExtension(name: string) {
-  return name.toLowerCase().split('.').pop() || '';
-}
-
-function validateImage(file: File): string | null {
-  if (!ALLOWED_IMAGE_TYPES.has(file.type) || !ALLOWED_EXTENSIONS[file.type]?.includes(fileExtension(file.name))) {
-    return `“${file.name}” সঠিক ইমেজ নয়। শুধু JPG, JPEG, PNG, WEBP বা GIF দিন।`;
-  }
-  if (file.size > MAX_IMAGE_BYTES) return `“${file.name}” ১০ MB সীমার চেয়ে বড়।`;
-  if (file.size === 0) return `“${file.name}” ফাইলটি খালি।`;
-  return null;
-}
-
-function mergeSelectedImages(current: File[], incoming: File[]) {
-  const valid: File[] = [];
-  const errors: string[] = [];
-  const keys = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
-
-  incoming.forEach((file) => {
-    const error = validateImage(file);
-    const key = `${file.name}:${file.size}:${file.lastModified}`;
-    if (error) errors.push(error);
-    else if (!keys.has(key)) {
-      keys.add(key);
-      valid.push(file);
-    }
-  });
-
-  const available = Math.max(0, MAX_IMAGE_COUNT - current.length);
-  if (valid.length > available) errors.push(`একবারে সর্বোচ্চ ${MAX_IMAGE_COUNT}টি ছবি নির্বাচন করা যাবে।`);
-  return { files: [...current, ...valid.slice(0, available)], error: errors[0] || null };
-}
-
-function usePreviewUrls(files: File[]) {
-  const previews = useMemo(
-    () => files.map((file) => ({ file, url: URL.createObjectURL(file) })),
-    [files]
-  );
-  useEffect(() => () => previews.forEach((preview) => URL.revokeObjectURL(preview.url)), [previews]);
-  return previews;
-}
 
 function formatDate(date: string) {
   const parsed = new Date(date);
@@ -148,265 +35,94 @@ function formatDate(date: string) {
   return new Intl.DateTimeFormat('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' }).format(parsed);
 }
 
-function StatusNotice({ notice }: { notice: Notice | null }) {
-  if (!notice) return null;
-  return (
-    <div
-      className={`flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm font-semibold ${
-        notice.kind === 'success'
-          ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-          : 'border-red-200 bg-red-50 text-red-700'
-      }`}
-      role={notice.kind === 'error' ? 'alert' : 'status'}
-      aria-live="polite"
-    >
-      {notice.kind === 'success' ? (
-        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-      ) : (
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-      )}
-      <span>{notice.text}</span>
-    </div>
-  );
-}
-
-function UploadProgress({ progress }: { progress: number }) {
-  return (
-    <div className="space-y-1.5" role="status" aria-live="polite">
-      <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
-        <span>{progress < 100 ? 'ছবি আপলোড হচ্ছে…' : 'সার্ভারে সংরক্ষণ হচ্ছে…'}</span>
-        <span>{progress}%</span>
-      </div>
-      <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
-        <div
-          className="h-full rounded-full bg-emerald-800 transition-[width] duration-200"
-          style={{ width: `${progress}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-interface ImagePickerProps {
-  files: File[];
-  setFiles: React.Dispatch<React.SetStateAction<File[]>>;
-  onValidationError: (message: string) => void;
-  disabled?: boolean;
-  compact?: boolean;
-}
-
-function ImagePicker({ files, setFiles, onValidationError, disabled = false, compact = false }: ImagePickerProps) {
-  const [dragging, setDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const previews = usePreviewUrls(files);
-
-  const addFiles = (list: FileList | null) => {
-    if (!list?.length) return;
-    setFiles((current) => {
-      const merged = mergeSelectedImages(current, Array.from(list));
-      if (merged.error) onValidationError(merged.error);
-      return merged.files;
-    });
-    if (inputRef.current) inputRef.current.value = '';
-  };
-
-  return (
-    <div className="min-w-0 space-y-3">
-      <div
-        className={`rounded-2xl border-2 border-dashed px-4 text-center transition ${
-          compact ? 'py-5' : 'py-7'
-        } ${
-          dragging
-            ? 'border-emerald-700 bg-emerald-50'
-            : 'border-slate-300 bg-slate-50 hover:border-emerald-600 hover:bg-emerald-50/40'
-        } ${disabled ? 'pointer-events-none opacity-60' : ''}`}
-        onDragEnter={(event) => {
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragOver={(event) => event.preventDefault()}
-        onDragLeave={(event) => {
-          event.preventDefault();
-          if (event.currentTarget === event.target) setDragging(false);
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragging(false);
-          addFiles(event.dataTransfer.files);
-        }}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept={IMAGE_ACCEPT}
-          multiple
-          className="sr-only"
-          disabled={disabled}
-          onChange={(event) => addFiles(event.target.files)}
-          aria-label="ছবি নির্বাচন করুন"
-        />
-        <UploadCloud className="mx-auto mb-2 h-8 w-8 text-emerald-800" />
-        <p className="text-sm font-bold text-slate-800">ছবি এখানে টেনে আনুন</p>
-        <p className="mt-1 text-xs text-slate-500">অথবা ডিভাইস থেকে এক বা একাধিক ছবি বেছে নিন</p>
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          className="mt-3 inline-flex items-center justify-center rounded-lg bg-white px-4 py-2 text-xs font-bold text-emerald-900 shadow-sm ring-1 ring-slate-300 transition hover:bg-emerald-50"
-        >
-          ছবি নির্বাচন করুন
-        </button>
-        <p className="mt-2 text-[11px] text-slate-400">JPG, PNG, WEBP বা GIF • প্রতি ছবি সর্বোচ্চ ১০ MB • সর্বোচ্চ ২০টি</p>
-      </div>
-
-      {previews.length > 0 && (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
-          {previews.map(({ file, url }, index) => (
-            <div key={`${file.name}-${file.lastModified}`} className="group relative min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
-              <img src={url} alt={file.name} className="aspect-square w-full object-cover" decoding="async" />
-              <button
-                type="button"
-                onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-                className="absolute right-1.5 top-1.5 rounded-full bg-slate-950/80 p-1.5 text-white shadow transition hover:bg-red-600"
-                title="নির্বাচিত ছবি সরান"
-                aria-label={`${file.name} সরান`}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-              <p className="truncate px-2 py-1.5 text-[10px] font-medium text-slate-600" title={file.name}>
-                {file.name}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+/* -------------------------------------------------------------------------- */
+/* Photos of the open album                                                    */
+/* -------------------------------------------------------------------------- */
 
 interface AlbumPhotosPanelProps {
   album: GalleryAlbum;
-  token: string | null;
   onAlbumPatch: (id: string, patch: Partial<GalleryAlbum>) => void;
 }
 
-function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps) {
-  const { handleAuthError } = useAuth();
+function AlbumPhotosPanel({ album, onAlbumPatch }: AlbumPhotosPanelProps) {
+  const toast = useToast();
+  const { saving, run } = useSaveAction();
   const {
     data: photos,
     loading,
     error,
     refetch,
-    setData: setPhotos,
   } = useFetch<GalleryPhoto[]>(`/api/gallery/albums/${album.id}/photos`);
+
   const [caption, setCaption] = useState('');
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [staged, setStaged] = useState<AssetValue[]>([]);
+  const [batchKey, setBatchKey] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     setCaption('');
-    setSelectedFiles([]);
-    setNotice(null);
-    setProgress(0);
+    setStaged([]);
+    setBatchKey((key) => key + 1);
   }, [album.id]);
 
-  const handleUpload = async (event: React.FormEvent) => {
+  const readyCount = staged.filter((asset) => asset.url).length;
+
+  const handleAdd = async (event: React.FormEvent) => {
     event.preventDefault();
-    setNotice(null);
-    if (selectedFiles.length === 0) {
-      setNotice({ kind: 'error', text: 'আপলোড করার জন্য অন্তত একটি ছবি নির্বাচন করুন।' });
-      return;
-    }
     if (caption.trim().length > 300) {
-      setNotice({ kind: 'error', text: 'ক্যাপশন ৩০০ অক্ষরের মধ্যে রাখুন।' });
+      toast.error({ title: 'ক্যাপশন ৩০০ অক্ষরের মধ্যে রাখুন' });
+      return;
+    }
+    if (!readyCount) {
+      toast.error({
+        title: 'কোনো ছবি যোগ হয়নি',
+        description: 'ছবি বেছে নিন — বাছার সাথে সাথেই Cloudinary-তে আপলোড শুরু হয়।',
+      });
       return;
     }
 
-    const formData = new FormData();
-    formData.append('caption', caption.trim());
-    selectedFiles.forEach((file) => formData.append('images', file));
-    setSubmitting(true);
-    setProgress(0);
+    const created = await run<GalleryPhoto | GalleryPhoto[]>({
+      url: `/api/gallery/albums/${album.id}/photos`,
+      body: { caption: caption.trim(), photos: staged },
+      success:
+        readyCount === 1 ? 'ছবিটি অ্যালবামে যোগ হয়েছে' : `${readyCount}টি ছবি অ্যালবামে যোগ হয়েছে`,
+      failure: 'ছবি যোগ করা যায়নি',
+    });
+    if (!created) return;
 
-    try {
-      const result = await uploadFormData<GalleryPhoto | GalleryPhoto[]>(
-        `/api/gallery/albums/${album.id}/photos`,
-        'POST',
-        token,
-        formData,
-        setProgress
-      );
-      const created = Array.isArray(result) ? result : [result];
-      setPhotos((current) => [...(current || []), ...created]);
-      onAlbumPatch(album.id, {
-        photoCount: (album.photoCount || 0) + created.length,
-        ...(!album.coverImage && created[0]
-          ? {
-              coverImage: created[0].image,
-              coverPublicId: created[0].publicId,
-              coverStorage: created[0].storage,
-            }
-          : {}),
-      });
-      setCaption('');
-      setSelectedFiles([]);
-      setProgress(100);
-      setNotice({
-        kind: 'success',
-        text: created.length === 1 ? 'ছবিটি সফলভাবে আপলোড হয়েছে।' : `${created.length}টি ছবি সফলভাবে আপলোড হয়েছে।`,
-      });
-    } catch (uploadError) {
-      const status = uploadError instanceof ApiRequestError ? uploadError.status : 0;
-      const text = uploadError instanceof Error ? uploadError.message : 'ছবি আপলোড করা যায়নি।';
-      // 401/403 = dead session. Clear it and let the shell redirect to login
-      // with this message instead of leaving the admin stuck mid-upload.
-      if (status === 401 || status === 403) handleAuthError(status, text);
-      setNotice({ kind: 'error', text });
-    } finally {
-      setSubmitting(false);
-    }
+    setCaption('');
+    setStaged([]);
+    setBatchKey((key) => key + 1);
+    refetch();
+    onAlbumPatch(album.id, {
+      photoCount: (album.photoCount || 0) + (Array.isArray(created) ? created.length : 1),
+      ...(!album.coverImage
+        ? { coverImage: staged[0].url, coverPublicId: staged[0].publicId, coverStorage: 'cloudinary' as const }
+        : {}),
+    });
   };
 
   const handleDelete = async (photo: GalleryPhoto) => {
     if (!confirm('আপনি কি এই ছবিটি মুছে ফেলতে চান?')) return;
     setDeletingId(photo.id);
-    setNotice(null);
-    try {
-      const response = await fetch(`/api/gallery/photos/${photo.id}`, {
-        method: 'DELETE',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        console.error(`[gallery] DELETE photo failed (${response.status}):`, text);
-        throw new ApiRequestError(apiErrorMessage(response.status, text, 'ছবিটি মুছতে সমস্যা হয়েছে।'), response.status);
-      }
-
-      const remaining = (photos || []).filter((item) => item.id !== photo.id);
-      setPhotos(remaining);
-      const patch: Partial<GalleryAlbum> = { photoCount: Math.max(0, (album.photoCount || 1) - 1) };
-      if (album.coverImage === photo.image) {
-        patch.coverImage = remaining[0]?.image || '';
-        patch.coverPublicId = remaining[0]?.publicId;
-        patch.coverStorage = remaining[0]?.storage;
-      }
-      onAlbumPatch(album.id, patch);
-      setNotice({ kind: 'success', text: 'ছবিটি মুছে ফেলা হয়েছে।' });
-    } catch (deleteError) {
-      console.error('[gallery] Could not delete photo:', deleteError);
-      const status = deleteError instanceof ApiRequestError ? deleteError.status : 0;
-      const text = deleteError instanceof Error ? deleteError.message : 'ছবিটি মুছতে সমস্যা হয়েছে।';
-      if (status === 401 || status === 403) handleAuthError(status, text);
-      setNotice({ kind: 'error', text });
-    } finally {
-      setDeletingId(null);
+    const done = await run({
+      url: `/api/gallery/photos/${photo.id}`,
+      method: 'DELETE',
+      success: 'ছবিটি মুছে ফেলা হয়েছে',
+      failure: 'ছবিটি মুছে ফেলা যায়নি',
+    });
+    setDeletingId(null);
+    if (done !== null) {
+      refetch();
+      onAlbumPatch(album.id, { photoCount: Math.max(0, (album.photoCount || 1) - 1) });
     }
   };
 
   return (
-    <section id="selected-album-photos" className="min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg">
+    <section
+      id="selected-album-photos"
+      className="min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg"
+    >
       <header className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-4 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-950 text-amber-400">
@@ -423,17 +139,20 @@ function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps)
       </header>
 
       <div className="space-y-6 p-4 sm:p-6">
-        <form onSubmit={handleUpload} className="space-y-4 rounded-2xl border border-slate-200 bg-white">
+        <form onSubmit={handleAdd} className="space-y-4 rounded-2xl border border-slate-200 bg-white">
           <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
             <h4 className="flex items-center gap-2 text-base font-bold text-slate-900">
               <UploadCloud className="h-4 w-4 text-emerald-800" /> নতুন ছবি যোগ করুন
             </h4>
-            <p className="mt-1 text-xs text-slate-500">একবারে এক বা একাধিক ছবি আপলোড করতে পারবেন।</p>
+            <p className="mt-1 text-xs text-slate-500">
+              ছবি বেছে নেওয়ার সাথে সাথেই Cloudinary-তে আপলোড হবে; তারপর "ছবি যোগ করুন" চাপলে অ্যালবামে বসে যাবে।
+            </p>
           </div>
+
           <div className="space-y-4 px-4 pb-5 sm:px-5">
             <div>
               <label htmlFor="gallery-caption" className="mb-1.5 block text-xs font-bold text-slate-700">
-                ছবির ক্যাপশন <span className="font-normal text-slate-400">(ঐচ্ছিক, নির্বাচিত সব ছবিতে প্রযোজ্য)</span>
+                ছবির ক্যাপশন <span className="font-normal text-slate-400">(ঐচ্ছিক, সব ছবিতে প্রযোজ্য)</span>
               </label>
               <input
                 id="gallery-caption"
@@ -443,26 +162,25 @@ function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps)
                 onChange={(event) => setCaption(event.target.value)}
                 placeholder="যেমন: শীতবস্ত্র বিতরণ কার্যক্রম"
                 className={inputClassName}
-                disabled={submitting}
+                disabled={saving}
               />
             </div>
 
-            <ImagePicker
-              files={selectedFiles}
-              setFiles={setSelectedFiles}
-              disabled={submitting}
-              compact
-              onValidationError={(text) => setNotice({ kind: 'error', text })}
+            <AssetBatchField
+              folder="gallery"
+              max={MAX_ALBUM_PHOTOS}
+              resetKey={batchKey}
+              onChange={setStaged}
+              disabled={saving}
             />
-            {submitting && <UploadProgress progress={progress} />}
-            <StatusNotice notice={notice} />
+
             <button
               type="submit"
-              disabled={submitting}
+              disabled={saving}
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-950 px-5 py-3 text-sm font-bold text-amber-400 shadow-sm transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
-              {submitting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-              {submitting ? 'আপলোড হচ্ছে…' : `ছবি আপলোড করুন${selectedFiles.length ? ` (${selectedFiles.length})` : ''}`}
+              {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+              {saving ? 'যোগ হচ্ছে…' : `ছবি যোগ করুন${readyCount ? ` (${readyCount})` : ''}`}
             </button>
           </div>
         </form>
@@ -473,7 +191,11 @@ function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps)
               <Images className="h-4 w-4 text-emerald-800" /> অ্যালবামের ছবিসমূহ
             </h4>
             {error && (
-              <button type="button" onClick={() => refetch()} className="text-xs font-bold text-emerald-800 hover:underline">
+              <button
+                type="button"
+                onClick={() => refetch()}
+                className="text-xs font-bold text-emerald-800 hover:underline"
+              >
                 আবার চেষ্টা করুন
               </button>
             )}
@@ -492,7 +214,10 @@ function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps)
           ) : (photos || []).length > 0 ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
               {(photos || []).map((photo) => (
-                <article key={photo.id} className="group relative min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm">
+                <article
+                  key={photo.id}
+                  className="group relative min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm"
+                >
                   <SafeImage
                     src={photo.image}
                     alt={photo.caption || album.title}
@@ -506,11 +231,15 @@ function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps)
                     type="button"
                     onClick={() => handleDelete(photo)}
                     disabled={deletingId === photo.id}
-                    className="absolute right-2 top-2 rounded-lg bg-red-600/95 p-2 text-white opacity-100 shadow transition hover:bg-red-700 disabled:opacity-60 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100"
+                    className="absolute right-2 top-2 rounded-lg bg-red-600/95 p-2 text-white shadow transition hover:bg-red-700 disabled:opacity-60"
                     title="ছবি মুছুন"
                     aria-label="ছবি মুছুন"
                   >
-                    {deletingId === photo.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    {deletingId === photo.id ? (
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
                   </button>
                 </article>
               ))}
@@ -528,8 +257,13 @@ function AlbumPhotosPanel({ album, token, onAlbumPatch }: AlbumPhotosPanelProps)
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* Albums                                                                      */
+/* -------------------------------------------------------------------------- */
+
 export const ManageGallery: React.FC = () => {
-  const { token, handleAuthError } = useAuth();
+  const toast = useToast();
+  const { saving: creating, run } = useSaveAction();
   const {
     data: albums,
     loading: albumsLoading,
@@ -537,22 +271,20 @@ export const ManageGallery: React.FC = () => {
     refetch: refetchAlbums,
     setData: setAlbums,
   } = useFetch<GalleryAlbum[]>('/api/gallery/albums');
+
   const [selectedAlbumId, setSelectedAlbumId] = useState('');
 
   const [albumTitle, setAlbumTitle] = useState('');
   const [albumDescription, setAlbumDescription] = useState('');
-  const [albumFiles, setAlbumFiles] = useState<File[]>([]);
-  const [creating, setCreating] = useState(false);
-  const [createProgress, setCreateProgress] = useState(0);
-  const [createNotice, setCreateNotice] = useState<Notice | null>(null);
+  const [albumPhotos, setAlbumPhotos] = useState<AssetValue[]>([]);
+  const [albumCover, setAlbumCover] = useState<AssetValue | null>(null);
+  const [batchKey, setBatchKey] = useState(0);
 
   const [editingAlbum, setEditingAlbum] = useState<GalleryAlbum | null>(null);
   const [editAlbumTitle, setEditAlbumTitle] = useState('');
   const [editAlbumDescription, setEditAlbumDescription] = useState('');
-  const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
-  const editCoverInputRef = useRef<HTMLInputElement>(null);
+  const [editCover, setEditCover] = useState<AssetValue | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [albumNotice, setAlbumNotice] = useState<Notice | null>(null);
   const [deletingAlbumId, setDeletingAlbumId] = useState<string | null>(null);
 
   const activeAlbum = useMemo(
@@ -573,87 +305,60 @@ export const ManageGallery: React.FC = () => {
     setAlbums((current) => (current || []).map((album) => (album.id === id ? { ...album, ...patch } : album)));
   };
 
+  const resetCreateForm = () => {
+    setAlbumTitle('');
+    setAlbumDescription('');
+    setAlbumPhotos([]);
+    setAlbumCover(null);
+    setBatchKey((key) => key + 1);
+  };
+
   const handleCreateAlbum = async (event: React.FormEvent) => {
     event.preventDefault();
-    setCreateNotice(null);
     const title = albumTitle.trim();
     const description = albumDescription.trim();
     if (!title) {
-      setCreateNotice({ kind: 'error', text: 'অ্যালবামের নাম লিখুন।' });
+      toast.error({ title: 'অ্যালবামের নাম লিখুন' });
       return;
     }
-    if (title.length > 120 || description.length > 500) {
-      setCreateNotice({ kind: 'error', text: title.length > 120 ? 'অ্যালবামের নাম ১২০ অক্ষরের মধ্যে রাখুন।' : 'বর্ণনা ৫০০ অক্ষরের মধ্যে রাখুন।' });
+    if (title.length > 120) {
+      toast.error({ title: 'অ্যালবামের নাম ১২০ অক্ষরের মধ্যে রাখুন' });
+      return;
+    }
+    if (description.length > 500) {
+      toast.error({ title: 'বর্ণনা ৫০০ অক্ষরের মধ্যে রাখুন' });
       return;
     }
 
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('description', description);
-    albumFiles.forEach((file) => formData.append('photos', file));
-    setCreating(true);
-    setCreateProgress(0);
+    const created = await run<GalleryAlbum & { photos?: GalleryPhoto[] }>({
+      url: '/api/gallery/albums',
+      body: {
+        title,
+        description,
+        // Already uploaded to Cloudinary by AssetBatchField — the album only stores the links.
+        photos: albumPhotos,
+        ...(albumCover ? { cover: albumCover } : {}),
+      },
+      success: albumPhotos.length
+        ? `অ্যালবাম ও ${albumPhotos.length}টি ছবি তৈরি হয়েছে`
+        : 'খালি অ্যালবামটি তৈরি হয়েছে',
+      failure: 'অ্যালবাম তৈরি করা যায়নি',
+    });
+    if (!created) return;
 
-    try {
-      const created = await uploadFormData<GalleryAlbumCreateResponse>(
-        '/api/gallery/albums',
-        'POST',
-        token,
-        formData,
-        setCreateProgress
-      );
+    setAlbums((current) => {
       const { photos: _initialPhotos, ...album } = created;
-      setAlbums((current) => [album, ...(current || []).filter((item) => item.id !== album.id)]);
-      setSelectedAlbumId(album.id);
-      setAlbumTitle('');
-      setAlbumDescription('');
-      setAlbumFiles([]);
-      setCreateProgress(100);
-      setCreateNotice({
-        kind: 'success',
-        text: album.photoCount
-          ? `অ্যালবাম ও ${album.photoCount}টি ছবি সফলভাবে তৈরি হয়েছে।`
-          : 'খালি অ্যালবামটি সফলভাবে তৈরি হয়েছে।',
-      });
-    } catch (createError) {
-      const status = createError instanceof ApiRequestError ? createError.status : 0;
-      const text = createError instanceof Error ? createError.message : 'অ্যালবাম তৈরি করা যায়নি।';
-      if (status === 401 || status === 403) handleAuthError(status, text);
-      setCreateNotice({ kind: 'error', text });
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  /** Clear the cover selection in React state AND in the native file input. */
-  const clearEditCover = () => {
-    setEditCoverFile(null);
-    if (editCoverInputRef.current) editCoverInputRef.current.value = '';
+      return [album as GalleryAlbum, ...(current || []).filter((item) => item.id !== album.id)];
+    });
+    setSelectedAlbumId(created.id);
+    resetCreateForm();
   };
 
   const startEditAlbum = (album: GalleryAlbum) => {
     setEditingAlbum(album);
     setEditAlbumTitle(album.title);
     setEditAlbumDescription(album.description || '');
-    clearEditCover();
-    setAlbumNotice(null);
-  };
-
-  const handleEditCover = (file: File | undefined) => {
-    if (!file) {
-      setEditCoverFile(null);
-      return;
-    }
-    const error = validateImage(file);
-    if (error) {
-      setAlbumNotice({ kind: 'error', text: error });
-      // Rejected file: also empty the input so it does not keep displaying a
-      // file name that will never be uploaded.
-      clearEditCover();
-      return;
-    }
-    setAlbumNotice(null);
-    setEditCoverFile(file);
+    setEditCover(album.coverImage ? { url: album.coverImage, publicId: album.coverPublicId } : null);
   };
 
   const handleSaveAlbum = async (event: React.FormEvent) => {
@@ -662,160 +367,119 @@ export const ManageGallery: React.FC = () => {
     const title = editAlbumTitle.trim();
     const description = editAlbumDescription.trim();
     if (!title) {
-      setAlbumNotice({ kind: 'error', text: 'অ্যালবামের নাম খালি রাখা যাবে না।' });
+      toast.error({ title: 'অ্যালবামের নাম খালি রাখা যাবে না' });
       return;
     }
     if (title.length > 120 || description.length > 500) {
-      setAlbumNotice({ kind: 'error', text: title.length > 120 ? 'অ্যালবামের নাম ১২০ অক্ষরের মধ্যে রাখুন।' : 'বর্ণনা ৫০০ অক্ষরের মধ্যে রাখুন।' });
+      toast.error({ title: title.length > 120 ? 'নাম ১২০ অক্ষরের মধ্যে রাখুন' : 'বর্ণনা ৫০০ অক্ষরের মধ্যে রাখুন' });
       return;
     }
 
-    const formData = new FormData();
-    formData.append('title', title);
-    formData.append('description', description);
-    // Prefer the validated state; fall back to the input's own FileList so a
-    // file that is visibly selected is never silently dropped from the request.
-    const coverFile = editCoverFile || editCoverInputRef.current?.files?.[0] || null;
-    if (coverFile) {
-      const coverError = validateImage(coverFile);
-      if (coverError) {
-        setAlbumNotice({ kind: 'error', text: coverError });
-        return;
-      }
-      // Field name must match `galleryUpload.single('coverImage')` on the server.
-      formData.append('coverImage', coverFile, coverFile.name);
-    }
     setSavingEdit(true);
-    try {
-      const updated = await uploadFormData<GalleryAlbum>(
-        `/api/gallery/albums/${editingAlbum.id}`,
-        'PUT',
-        token,
-        formData,
-        () => undefined
-      );
-      setAlbums((current) => (current || []).map((album) => (album.id === updated.id ? updated : album)));
-      setEditingAlbum(null);
-      clearEditCover();
-      setAlbumNotice({ kind: 'success', text: 'অ্যালবামের তথ্য আপডেট হয়েছে।' });
-    } catch (editError) {
-      const status = editError instanceof ApiRequestError ? editError.status : 0;
-      const text = editError instanceof Error ? editError.message : 'অ্যালবাম আপডেট করা যায়নি।';
-      if (status === 401 || status === 403) handleAuthError(status, text);
-      setAlbumNotice({ kind: 'error', text });
-    } finally {
-      setSavingEdit(false);
-    }
+    const updated = await run<GalleryAlbum>({
+      url: `/api/gallery/albums/${editingAlbum.id}`,
+      method: 'PUT',
+      body: { title, description, cover: editCover },
+      success: 'অ্যালবামের তথ্য আপডেট হয়েছে',
+      failure: 'অ্যালবাম আপডেট করা যায়নি',
+    });
+    setSavingEdit(false);
+    if (!updated) return;
+
+    setAlbums((current) => (current || []).map((album) => (album.id === updated.id ? updated : album)));
+    setEditingAlbum(null);
+    setEditCover(null);
   };
 
   const handleDeleteAlbum = async (album: GalleryAlbum) => {
     if (!confirm(`“${album.title}” অ্যালবাম ও এর সব ছবি স্থায়ীভাবে মুছে যাবে। আপনি কি নিশ্চিত?`)) return;
     setDeletingAlbumId(album.id);
-    setAlbumNotice(null);
-    try {
-      const response = await fetch(`/api/gallery/albums/${album.id}`, {
-        method: 'DELETE',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        console.error(`[gallery] DELETE album failed (${response.status}):`, text);
-        throw new ApiRequestError(apiErrorMessage(response.status, text, 'অ্যালবামটি মুছতে সমস্যা হয়েছে।'), response.status);
-      }
-      setAlbums((current) => (current || []).filter((item) => item.id !== album.id));
-      if (editingAlbum?.id === album.id) setEditingAlbum(null);
-      setAlbumNotice({ kind: 'success', text: 'অ্যালবাম ও এর ছবিগুলো মুছে ফেলা হয়েছে।' });
-    } catch (deleteError) {
-      console.error('[gallery] Could not delete album:', deleteError);
-      const status = deleteError instanceof ApiRequestError ? deleteError.status : 0;
-      const text = deleteError instanceof Error ? deleteError.message : 'অ্যালবামটি মুছতে সমস্যা হয়েছে।';
-      if (status === 401 || status === 403) handleAuthError(status, text);
-      setAlbumNotice({ kind: 'error', text });
-    } finally {
-      setDeletingAlbumId(null);
-    }
+    const done = await run({
+      url: `/api/gallery/albums/${album.id}`,
+      method: 'DELETE',
+      success: 'অ্যালবাম ও এর ছবিগুলো মুছে ফেলা হয়েছে',
+      failure: 'অ্যালবাম মুছে ফেলা যায়নি',
+    });
+    setDeletingAlbumId(null);
+    if (done === null) return;
+
+    setAlbums((current) => (current || []).filter((item) => item.id !== album.id));
+    if (editingAlbum?.id === album.id) setEditingAlbum(null);
   };
 
   const openAlbum = (id: string) => {
     setSelectedAlbumId(id);
-    window.setTimeout(() => document.getElementById('selected-album-photos')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+    window.setTimeout(
+      () => document.getElementById('selected-album-photos')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      0
+    );
   };
 
   return (
     <div className="min-w-0 space-y-6">
       <section className="min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-lg">
-        <header className="border-b border-emerald-900 bg-emerald-950 px-4 py-5 text-white sm:px-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-slate-950">
-                <FolderPlus className="h-5 w-5" />
-              </span>
-              <div className="min-w-0">
-                <h2 className="text-xl font-bold text-white sm:text-2xl">ফটো গ্যালারি</h2>
-                <p className="mt-0.5 text-xs text-emerald-200">নতুন অ্যালবাম তৈরি করুন এবং একসাথে একাধিক ছবি যোগ করুন</p>
-              </div>
-            </div>
-            <span className="self-start rounded-full border border-emerald-700 bg-emerald-900 px-3 py-1.5 text-xs font-bold text-emerald-100 sm:self-auto">
-              মোট {albums?.length || 0}টি অ্যালবাম
+        <header className="flex flex-col gap-3 border-b border-emerald-900 bg-emerald-950 px-4 py-5 text-white sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-slate-950">
+              <FolderPlus className="h-5 w-5" />
             </span>
+            <div className="min-w-0">
+              <h2 className="text-xl font-bold text-white sm:text-2xl">ফটো গ্যালারি</h2>
+              <p className="mt-0.5 text-xs text-emerald-200">নতুন অ্যালবাম তৈরি করুন এবং একসাথে একাধিক ছবি যোগ করুন</p>
+            </div>
           </div>
+          <span className="self-start rounded-full border border-emerald-700 bg-emerald-900 px-3 py-1.5 text-xs font-bold text-emerald-100 sm:self-auto">
+            মোট {albums?.length || 0}টি অ্যালবাম
+          </span>
         </header>
 
         <form onSubmit={handleCreateAlbum} className="space-y-5 p-4 sm:p-6">
-          <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="album-title" className="mb-1.5 block text-xs font-bold text-slate-700">
-                অ্যালবামের নাম <span className="text-red-600">*</span>
-              </label>
+              <label className="mb-1.5 block text-xs font-bold text-slate-700">অ্যালবামের নাম *</label>
               <input
-                id="album-title"
-                type="text"
-                required
-                maxLength={120}
                 value={albumTitle}
+                maxLength={120}
                 onChange={(event) => setAlbumTitle(event.target.value)}
-                placeholder="যেমন: চরাঞ্চলে ত্রাণ বিতরণ ২০২৬"
+                placeholder="যেমন: বন্যা ত্রাণ ২০২৪"
                 className={inputClassName}
                 disabled={creating}
               />
             </div>
             <div>
-              <label htmlFor="album-description" className="mb-1.5 block text-xs font-bold text-slate-700">
-                সংক্ষিপ্ত বর্ণনা <span className="font-normal text-slate-400">(ঐচ্ছিক)</span>
-              </label>
+              <label className="mb-1.5 block text-xs font-bold text-slate-700">বর্ণনা (ঐচ্ছিক)</label>
               <input
-                id="album-description"
-                type="text"
-                maxLength={500}
                 value={albumDescription}
+                maxLength={500}
                 onChange={(event) => setAlbumDescription(event.target.value)}
-                placeholder="অ্যালবাম সম্পর্কে সংক্ষিপ্ত তথ্য"
+                placeholder="সংক্ষেপে কার্যক্রমের বিবরণ"
                 className={inputClassName}
                 disabled={creating}
               />
             </div>
           </div>
 
-          <div>
-            <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <p className="text-xs font-bold text-slate-700">সরাসরি ছবি আপলোড <span className="font-normal text-slate-400">(ঐচ্ছিক)</span></p>
-                <p className="mt-0.5 text-[11px] text-slate-500">ছবি দিলে প্রথম ছবিটি অ্যালবামের কভার হবে। ছবি ছাড়াও অ্যালবাম তৈরি করা যাবে।</p>
-              </div>
-              {albumFiles.length > 0 && <span className="text-xs font-bold text-emerald-800">{albumFiles.length}টি নির্বাচিত</span>}
-            </div>
-            <ImagePicker
-              files={albumFiles}
-              setFiles={setAlbumFiles}
-              disabled={creating}
-              onValidationError={(text) => setCreateNotice({ kind: 'error', text })}
-            />
-          </div>
+          <AssetBatchField
+            folder="gallery"
+            max={MAX_ALBUM_PHOTOS}
+            resetKey={batchKey}
+            onChange={setAlbumPhotos}
+            disabled={creating}
+          />
 
-          {creating && <UploadProgress progress={createProgress} />}
-          <StatusNotice notice={createNotice} />
+          <AssetField
+            kind="image"
+            folder="gallery"
+            compact
+            label="কভার ছবি (ঐচ্ছিক — না দিলে প্রথম ছবিটাই কভার হবে)"
+            value={albumCover}
+            onChange={setAlbumCover}
+          />
+
           <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-[11px] leading-relaxed text-slate-400">আপলোড করা ছবি নিরাপদভাবে যাচাই করে Cloudinary অথবা সার্ভার স্টোরেজে সংরক্ষণ হবে।</p>
+            <p className="text-[11px] leading-relaxed text-slate-400">
+              প্রতিটি ছবি সরাসরি Cloudinary-তে সংরক্ষিত হয় — সার্ভারের ডিস্কে কিছু থাকে না, তাই ডিপ্লয়ের পরও ছবি হারায় না।
+            </p>
             <button
               type="submit"
               disabled={creating}
@@ -837,13 +501,15 @@ export const ManageGallery: React.FC = () => {
             <p className="mt-1 text-xs text-slate-500">ছবি দেখতে বা নতুন ছবি যোগ করতে একটি অ্যালবাম খুলুন।</p>
           </div>
           {albumsError && (
-            <button type="button" onClick={() => refetchAlbums()} className="self-start text-xs font-bold text-emerald-800 hover:underline">
+            <button
+              type="button"
+              onClick={() => refetchAlbums()}
+              className="self-start text-xs font-bold text-emerald-800 hover:underline"
+            >
               আবার লোড করুন
             </button>
           )}
         </div>
-
-        <StatusNotice notice={albumNotice} />
 
         {albumsLoading && !albums ? (
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2" aria-label="অ্যালবাম লোড হচ্ছে">
@@ -863,7 +529,9 @@ export const ManageGallery: React.FC = () => {
               <article
                 key={album.id}
                 className={`min-w-0 overflow-hidden rounded-2xl border bg-slate-50 transition ${
-                  selectedAlbumId === album.id ? 'border-emerald-700 ring-2 ring-emerald-700/10' : 'border-slate-200 hover:border-slate-300'
+                  selectedAlbumId === album.id
+                    ? 'border-emerald-700 ring-2 ring-emerald-700/10'
+                    : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
                 <div className="flex min-w-0 gap-3 p-3 sm:gap-4 sm:p-4">
@@ -877,12 +545,20 @@ export const ManageGallery: React.FC = () => {
                   <div className="min-w-0 flex-1 py-0.5">
                     <div className="flex items-start justify-between gap-2">
                       <h4 className="line-clamp-2 text-base font-bold leading-snug text-slate-900">{album.title}</h4>
-                      {selectedAlbumId === album.id && <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-700" title="নির্বাচিত" />}
+                      {selectedAlbumId === album.id && (
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-700" title="নির্বাচিত" />
+                      )}
                     </div>
-                    <p className="mt-1 line-clamp-2 min-h-8 text-xs leading-relaxed text-slate-500">{album.description || 'কোনো বর্ণনা দেওয়া হয়নি।'}</p>
+                    <p className="mt-1 line-clamp-2 min-h-8 text-xs leading-relaxed text-slate-500">
+                      {album.description || 'কোনো বর্ণনা দেওয়া হয়নি।'}
+                    </p>
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-semibold text-slate-500">
-                      <span className="inline-flex items-center gap-1"><ImageIcon className="h-3 w-3" /> {album.photoCount || 0}টি ছবি</span>
-                      <span className="inline-flex items-center gap-1"><CalendarDays className="h-3 w-3" /> {formatDate(album.createdAt)}</span>
+                      <span className="inline-flex items-center gap-1">
+                        <ImageIcon className="h-3 w-3" /> {album.photoCount || 0}টি ছবি
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <CalendarDays className="h-3 w-3" /> {formatDate(album.createdAt)}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -909,32 +585,33 @@ export const ManageGallery: React.FC = () => {
                         disabled={savingEdit}
                       />
                     </div>
-                    <div>
-                      <label className="mb-1 block text-[11px] font-bold text-slate-600">নতুন কভার ছবি (ঐচ্ছিক)</label>
-                      <input
-                        ref={editCoverInputRef}
-                        type="file"
-                        name="coverImage"
-                        accept={IMAGE_ACCEPT}
-                        onChange={(event) => handleEditCover(event.target.files?.[0])}
-                        className="block w-full min-w-0 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2 text-xs text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-100 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-emerald-900"
-                        disabled={savingEdit}
-                      />
-                      {editCoverFile && <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {editCoverFile.name}</p>}
-                    </div>
+                    <AssetField
+                      kind="image"
+                      folder="gallery"
+                      compact
+                      label="কভার ছবি পরিবর্তন (ঐচ্ছিক)"
+                      value={editCover}
+                      onChange={setEditCover}
+                      disabled={savingEdit}
+                    />
                     <div className="flex gap-2">
                       <button
                         type="submit"
                         disabled={savingEdit}
                         className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-950 px-3 py-2.5 text-xs font-bold text-amber-400 disabled:opacity-60"
                       >
-                        {savingEdit ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} সেভ করুন
+                        {savingEdit ? (
+                          <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Save className="h-3.5 w-3.5" />
+                        )}{' '}
+                        সেভ করুন
                       </button>
                       <button
                         type="button"
                         onClick={() => {
                           setEditingAlbum(null);
-                          clearEditCover();
+                          setEditCover(null);
                         }}
                         className="rounded-lg bg-slate-200 px-3 py-2.5 text-slate-600 hover:bg-slate-300"
                         aria-label="সম্পাদনা বাতিল করুন"
@@ -950,7 +627,8 @@ export const ManageGallery: React.FC = () => {
                       onClick={() => openAlbum(album.id)}
                       className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-950 px-3 py-2.5 text-xs font-bold text-amber-400 transition hover:bg-emerald-900"
                     >
-                      <Eye className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">অ্যালবাম খুলুন</span>
+                      <Eye className="h-3.5 w-3.5 shrink-0" />{' '}
+                      <span className="truncate">অ্যালবাম খুলুন</span>
                     </button>
                     <button
                       type="button"
@@ -969,7 +647,11 @@ export const ManageGallery: React.FC = () => {
                       title="অ্যালবাম মুছুন"
                       aria-label="অ্যালবাম মুছুন"
                     >
-                      {deletingAlbumId === album.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      {deletingAlbumId === album.id ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
                     </button>
                   </div>
                 )}
@@ -985,7 +667,7 @@ export const ManageGallery: React.FC = () => {
         )}
       </section>
 
-      {activeAlbum && <AlbumPhotosPanel album={activeAlbum} token={token} onAlbumPatch={patchAlbum} />}
+      {activeAlbum && <AlbumPhotosPanel album={activeAlbum} onAlbumPatch={patchAlbum} />}
     </div>
   );
 };
