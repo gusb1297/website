@@ -39,7 +39,8 @@ export function sanitizeUrl(value: unknown): string {
 function cleanPublicId(value: unknown): string | undefined {
   const id = typeof value === 'string' ? value.trim() : '';
   if (!id || id.length > 300) return undefined;
-  return /^[\w./-]+$/.test(id) ? id : undefined;
+  // Cloudinary public ids and `amstorage/<id>` document references share one field.
+  return /^[\w.:/-]+$/.test(id) ? id : undefined;
 }
 
 function cleanResourceType(value: unknown): AssetRef['resourceType'] {
@@ -147,7 +148,7 @@ export function toBool(value: unknown, fallback: boolean): boolean {
   return fallback;
 }
 
-/** Free a Cloudinary asset that is no longer referenced by any record. */
+/** Free a stored asset (Cloudinary or AM Storage document) that is no longer referenced by any record. */
 export async function releaseAsset(ref?: AssetRef | null, stillReferenced?: (url: string) => boolean) {
   if (!ref?.publicId) return;
   if (ref.url && stillReferenced?.(ref.url)) return;

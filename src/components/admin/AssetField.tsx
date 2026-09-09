@@ -20,6 +20,7 @@ import {
   UPLOAD_SPECS,
   discardAsset,
   formatBytes,
+  storageLabelFor,
   uploadFile,
   validateFile,
   UploadError,
@@ -138,7 +139,7 @@ export const AssetField: React.FC<AssetFieldProps> = ({
           clearPending();
           toast.success({
             title: `${spec.label} আপলোড হয়েছে`,
-            description: `${file.name}${asset.bytes ? ` · ${formatBytes(asset.bytes)}` : ''} → Cloudinary`,
+            description: `${file.name}${asset.bytes ? ` · ${formatBytes(asset.bytes)}` : ''} → ${storageLabelFor(kind)}`,
           });
         })
         .catch((err: UploadError) => {
@@ -201,7 +202,7 @@ export const AssetField: React.FC<AssetFieldProps> = ({
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-bold text-slate-800">{pending.name}</p>
               <p className="text-[11px] text-emerald-800">
-                {progress < 100 ? `আপলোড হচ্ছে… ${progress}%` : 'Cloudinary যাচাই করছে…'}
+                {progress < 100 ? `আপলোড হচ্ছে… ${progress}%` : `${storageLabelFor(kind)} যাচাই করছে…`}
               </p>
               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-emerald-100">
                 <div
@@ -348,7 +349,7 @@ const AssetPreview: React.FC<{ asset: AssetValue; kind: AssetKind; fallbackName?
           ) : null}
           {asset.width && asset.height ? <span>{`${asset.width}×${asset.height}`}</span> : null}
           <span className="inline-flex items-center gap-1 font-bold text-emerald-700">
-            <CheckCircle2 className="h-3 w-3" /> Cloudinary
+            <CheckCircle2 className="h-3 w-3" /> {storageLabelFor(kind)}
           </span>
         </p>
       </div>

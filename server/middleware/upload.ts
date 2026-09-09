@@ -8,8 +8,9 @@ import { putFile, StoredAsset, UploadKind } from '../services/storage';
 /**
  * Upload transport — the only place that touches the file system, and only for
  * a few seconds. Files are received into the OS temp directory (never into the
- * project's ./uploads folder), streamed to Cloudinary by `putFile`, and the
- * staging copy is deleted immediately afterwards.
+ * project's ./uploads folder), streamed to the cloud by `putFile` (Cloudinary
+ * for images/videos, the AM Storage gateway for PDFs & other documents), and
+ * the staging copy is deleted immediately afterwards.
  */
 const STAGING_DIR = path.join(os.tmpdir(), 'gusb-upload-staging');
 fs.mkdirSync(STAGING_DIR, { recursive: true });
@@ -203,10 +204,14 @@ export function receiveUpload(profile: UploadProfile): RequestHandler[] {
       try {
         const rawFolder = String(req.query.folder || req.body?.folder || '');
         const folder = rawFolder.replace(/[^a-zA-Z0-9/_-]/g, '').slice(0, 60) || profile;
+        const rawTitle = typeof req.body?.title === 'string' ? req.body.title : '';
         req.uploadedAsset = await putFile(req.file.path, {
           kind,
           folder,
           originalName: req.file.originalname,
+          mimeType: req.file.mimetype,
+          // Documents carry a human title into the AM Storage record.
+          title: rawTitle.trim().slice(0, 200) || undefined,
         });
         next();
       } catch (err) {

@@ -1,10 +1,16 @@
 /**
- * Media storage — Cloudinary only.
+ * Media storage — Cloudinary for pictures & videos, AM Storage for documents.
  * ---------------------------------------------------------------------------
  * This module replaces the old "save to ./uploads on the server disk" system.
  * Nothing is ever written to the project directory any more: a file that is
- * uploaded by an admin is streamed to Cloudinary and only its public URL
+ * uploaded by an admin is streamed to the cloud and only its public URL
  * (+ public_id, so we can delete it later) is stored in MongoDB.
+ *
+ * Routing by kind:
+ *   image / video → Cloudinary (this file)
+ *   document      → AM Storage gateway (services/amStorage.ts). Cloudinary
+ *                   cannot host the site's PDFs, so every PDF / DOC / DOCX /
+ *                   TXT goes through the bridge instead — see putFile().
  *
  * Why Cloudinary only:
  *   Render / Heroku / Railway … wipe the container disk on every deploy, so
@@ -15,6 +21,20 @@
  */
 import fs from 'fs';
 import { v2 as cloudinary } from 'cloudinary';
+import {
+  AmStorageError,
+  amStorageHost,
+  deleteDocumentFromAmStorage,
+  isAmStorageConfigured,
+  uploadDocumentToAmStorage,
+} from './amStorage';
+
+/**
+ * Documents are not Cloudinary assets, yet every record keeps a single
+ * `publicId` string next to the URL. Gateway files are therefore recorded as
+ * `amstorage/<file id>` so deleteAsset() can tell the two providers apart.
+ */
+export const AM_STORAGE_ID_PREFIX = 'amstorage/';
 
 /** Every asset category the admin panel can upload. */
 export type UploadKind = 'image' | 'video' | 'document';
@@ -85,6 +105,8 @@ export function isStorageConfigured(): boolean {
 export interface StorageStatus {
   provider: 'cloudinary';
   configured: boolean;
+  /** Document (PDF) gateway — separate from the Cloudinary media account. */
+  documents: { provider: 'am-storage'; configured: boolean; host: string };
   /** True when uploads can be stored durably right now. */
   durable: boolean;
   cloudName?: string;
@@ -96,11 +118,17 @@ export interface StorageStatus {
 
 export function describeStorageStatus(): StorageStatus {
   const isConfigured = ensureConfigured();
+  const documents: StorageStatus['documents'] = {
+    provider: 'am-storage',
+    configured: isAmStorageConfigured(),
+    host: amStorageHost(),
+  };
   if (isConfigured) {
     const pingFailed = lastPing && !lastPing.ok;
     return {
       provider: 'cloudinary',
       configured: true,
+      documents,
       durable: !pingFailed,
       cloudName: process.env.CLOUDINARY_CLOUD_NAME || cloudinary.config().cloud_name || undefined,
       folder: cloudFolder(),
@@ -114,6 +142,7 @@ export function describeStorageStatus(): StorageStatus {
   return {
     provider: 'cloudinary',
     configured: false,
+    documents,
     durable: false,
     folder: cloudFolder(),
     lastCheck: lastPing,
@@ -150,7 +179,8 @@ export interface StoredAsset {
   publicId?: string;
   kind: UploadKind;
   resourceType: 'image' | 'video' | 'raw';
-  storage: 'cloudinary';
+  /** Where the bytes live: Cloudinary (image/video) or the AM Storage gateway (documents). */
+  storage: 'cloudinary' | 'am-storage';
   bytes?: number;
   format?: string;
   /** Seconds — videos only. */
@@ -214,32 +244,35 @@ interface CloudinaryResponse {
 }
 
 /**
- * Push one staged (temporary) file to Cloudinary and remove the temp copy.
+ * Push one staged (temporary) file to the cloud and remove the temp copy.
  *
- * Videos go through `upload_large`, which chunks the request so a few-hundred-MB
- * file does not die on a proxy timeout. Any failure throws a StorageError with a
- * message the admin panel can show directly — we never fall back to the local disk.
+ * Documents (PDF, DOC, DOCX, TXT) go to the AM Storage gateway; pictures and
+ * videos to Cloudinary. Videos go through `upload_large`, which chunks the
+ * request so a few-hundred-MB file does not die on a proxy timeout. Any failure
+ * throws a StorageError / AmStorageError with a message the admin panel can
+ * show directly — we never fall back to the local disk.
  */
 export async function putFile(
   tempPath: string,
-  options: { kind: UploadKind; folder?: string; originalName?: string }
+  options: { kind: UploadKind; folder?: string; originalName?: string; mimeType?: string; title?: string }
 ): Promise<StoredAsset> {
   const { kind, folder = 'misc', originalName } = options;
+
+  if (kind === 'document') {
+    return putDocument(tempPath, options);
+  }
 
   if (!ensureConfigured()) {
     deleteLocalCopy(tempPath);
     throw new StorageError('cloud_storage_not_configured', NOT_CONFIGURED_MESSAGE);
   }
 
-  // `auto` for documents on purpose: Cloudinary keeps a PDF as an inline-
-  // viewable `image/pdf` resource (the site opens it in its PDF viewer) while a
-  // DOCX becomes a `raw` download. Images and videos are pinned explicitly.
-  const resourceType: StoredAsset['resourceType'] =
-    kind === 'image' ? 'image' : kind === 'video' ? 'video' : 'raw';
+  // Only images and videos reach Cloudinary (documents were routed above).
+  const resourceType: StoredAsset['resourceType'] = kind === 'image' ? 'image' : 'video';
 
   const base = {
     folder: assetFolder(folder),
-    resource_type: kind === 'document' ? 'auto' : resourceType,
+    resource_type: resourceType,
     use_filename: true,
     unique_filename: true,
     overwrite: false,
@@ -306,8 +339,44 @@ export async function putFile(
   }
 }
 
+/** Documents: hand the staged file to the AM Storage gateway. */
+async function putDocument(
+  tempPath: string,
+  options: { folder?: string; originalName?: string; mimeType?: string; title?: string }
+): Promise<StoredAsset> {
+  try {
+    const stored = await uploadDocumentToAmStorage({
+      filePath: tempPath,
+      originalName: options.originalName,
+      mimeType: options.mimeType,
+      title: options.title,
+    });
+    deleteLocalCopy(tempPath);
+    const ext = (options.originalName || '').split('.').pop()?.toLowerCase() || undefined;
+    return {
+      url: stored.url,
+      publicId: stored.fileId ? `${AM_STORAGE_ID_PREFIX}${stored.fileId}` : undefined,
+      kind: 'document',
+      resourceType: 'raw',
+      storage: 'am-storage',
+      bytes: stored.bytes,
+      format: ext && ext.length <= 5 ? ext : undefined,
+      thumbnailUrl: stored.url,
+      originalName: options.originalName,
+    };
+  } catch (error) {
+    deleteLocalCopy(tempPath);
+    if (error instanceof AmStorageError) throw error;
+    const message = (error as Error).message || String(error);
+    console.error('[storage] document upload failed:', message);
+    throw new AmStorageError(`PDF/নথি ফাইলটি সংরক্ষণ করা যায়নি।\n(${message})`, error);
+  }
+}
+
 /**
- * Delete a Cloudinary asset. Safe to call with an undefined id (legacy URLs).
+ * Delete a stored asset. Safe to call with an undefined id (legacy URLs).
+ * Ids prefixed `amstorage/` belong to the document gateway; everything else is
+ * a Cloudinary public id.
  *
  * When the resource type was not recorded next to the public id, every type is
  * tried until Cloudinary reports `ok` — a PDF uploaded with `resource_type=auto`
@@ -315,7 +384,12 @@ export async function putFile(
  * reason to keep billing.
  */
 export async function deleteAsset(publicId?: string, resourceType?: StoredAsset['resourceType']): Promise<void> {
-  if (!publicId || !ensureConfigured()) return;
+  if (!publicId) return;
+  if (publicId.startsWith(AM_STORAGE_ID_PREFIX)) {
+    await deleteDocumentFromAmStorage(publicId.slice(AM_STORAGE_ID_PREFIX.length));
+    return;
+  }
+  if (!ensureConfigured()) return;
 
   const attempts: StoredAsset['resourceType'][] = resourceType ? [resourceType] : ['image', 'video', 'raw'];
   for (const type of attempts) {
