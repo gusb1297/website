@@ -33,3 +33,50 @@ function statusFallback(status: number, fallback: string): string {
   if (status === 503) return 'সার্ভারের স্টোরেজ/ডাটাবেস এখন উপলব্ধ নেই। অ্যাডমিন ড্যাশবোর্ডের উপরের সতর্কবার্তা দেখুন।';
   return fallback;
 }
+
+/** Error carrying the HTTP status so callers can recognise a dead session. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status = 0) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+/**
+ * JSON request helper used by every admin form.
+ *
+ * Content forms no longer send multipart bodies — media is uploaded on select
+ * (see src/lib/upload.ts) and the record itself is saved as JSON with the
+ * returned Cloudinary URL.
+ */
+export async function jsonRequest<T>(
+  url: string,
+  options: { method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; token?: string | null; body?: unknown }
+): Promise<T> {
+  const { method, token, body } = options;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError('ইন্টারনেট সংযোগ বিচ্ছিন্ন — অনুরোধটি পাঠানো যায়নি।');
+  }
+
+  if (!res.ok) throw new ApiError(await readApiError(res, 'অনুরোধটি সম্পন্ন করা যায়নি।'), res.status);
+
+  const text = await res.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError('সার্ভার থেকে সঠিক উত্তর আসেনি।', res.status);
+  }
+}

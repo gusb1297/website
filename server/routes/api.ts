@@ -1,16 +1,19 @@
 import { Router } from 'express';
-import { galleryUpload, MAX_GALLERY_FILES, upload } from '../config/multer';
+import { receiveUpload, rejectMultipart, limitsForClient } from '../middleware/upload';
 import { authenticateJwt, requireAdmin } from '../middleware/auth';
 import { createRateLimit } from '../middleware/rateLimit';
 import { asyncHandler } from '../utils/asyncHandler';
+import { discardAsset, respondWithAsset } from '../controllers/uploadController';
 
 const loginRateLimiter = createRateLimit(20, 15 * 60 * 1000);
+/** Anonymous visitors may only upload a CV, and only a handful of times. */
+const publicUploadRateLimiter = createRateLimit(12, 30 * 60 * 1000);
+
 import {
   login,
   authStatus,
   setupAdmin,
   getMe,
-  uploadDirectFile,
   getHeroSlides,
   createHeroSlide,
   updateHeroSlide,
@@ -29,8 +32,6 @@ import {
   getVideos,
   createVideo,
   updateVideo,
-  uploadVideo,
-  embedVideo,
   streamVideo,
   deleteVideo,
   getNotices,
@@ -78,6 +79,38 @@ import { getAdmins, postAdmin, putAdmin, removeAdmin } from '../controllers/admi
 
 const router = Router();
 
+/* ---------------------------------------------------------------------------
+ * FILE UPLOADS — the single door every media file goes through.
+ *
+ * The browser posts the raw file to one of these endpoints; it is streamed
+ * straight to Cloudinary and the JSON response ({ url, public_id, … }) is what
+ * the admin form then stores inside the record it is creating/editing.
+ * No file is ever kept in the project folder.
+ * ------------------------------------------------------------------------- */
+router.post('/uploads/image', authenticateJwt, ...receiveUpload('image'), asyncHandler(respondWithAsset));
+router.post('/uploads/logo', authenticateJwt, ...receiveUpload('logo'), asyncHandler(respondWithAsset));
+router.post('/uploads/video', authenticateJwt, ...receiveUpload('video'), asyncHandler(respondWithAsset));
+router.post('/uploads/document', authenticateJwt, ...receiveUpload('document'), asyncHandler(respondWithAsset));
+// Applicants are not logged in, so their CV gets its own tightened endpoint.
+router.post(
+  '/uploads/cv',
+  publicUploadRateLimiter,
+  ...receiveUpload('cv'),
+  asyncHandler(respondWithAsset)
+);
+// Ceilings for the pickers (sizes are enforced here, the UI only warns early).
+router.get('/uploads/limits', (_req, res) => res.json(limitsForClient()));
+
+// Uploaded but abandoned (admin pressed "remove" before saving) — clean it up.
+router.post('/uploads/discard', authenticateJwt, asyncHandler(discardAsset));
+
+/* ---------------------------------------------------------------------------
+ * All content endpoints below are JSON-only now: the media file has already
+ * been stored by /uploads/*, so a form submits its URL (+ publicId) instead of
+ * a multipart body. `rejectMultipart` turns a stale cached bundle into a clear
+ * message instead of a record saved with an empty image.
+ * ------------------------------------------------------------------------- */
+
 // Auth
 router.get('/auth/status', asyncHandler(authStatus));
 router.post('/auth/setup', loginRateLimiter, asyncHandler(setupAdmin));
@@ -92,110 +125,75 @@ router.delete('/admins/:id', authenticateJwt, requireAdmin, asyncHandler(removeA
 
 // Hero Slides
 router.get('/hero-slides', asyncHandler(getHeroSlides));
-router.post('/hero-slides', authenticateJwt, upload.single('image'), asyncHandler(createHeroSlide));
+router.post('/hero-slides', authenticateJwt, rejectMultipart, asyncHandler(createHeroSlide));
 router.put('/hero-slides/reorder', authenticateJwt, asyncHandler(reorderHeroSlides));
-router.put('/hero-slides/:id', authenticateJwt, upload.single('image'), asyncHandler(updateHeroSlide));
+router.put('/hero-slides/:id', authenticateJwt, rejectMultipart, asyncHandler(updateHeroSlide));
 router.delete('/hero-slides/:id', authenticateJwt, asyncHandler(deleteHeroSlide));
 
 // Programs
 router.get('/programs', asyncHandler(getPrograms));
 router.get('/programs/:slug', asyncHandler(getProgramBySlug));
-router.post('/programs', authenticateJwt, upload.single('coverImage'), asyncHandler(createProgram));
-router.put('/programs/:id', authenticateJwt, upload.single('coverImage'), asyncHandler(updateProgram));
+router.post('/programs', authenticateJwt, rejectMultipart, asyncHandler(createProgram));
+router.put('/programs/:id', authenticateJwt, rejectMultipart, asyncHandler(updateProgram));
 router.delete('/programs/:id', authenticateJwt, asyncHandler(deleteProgram));
 
 // News
 router.get('/news', asyncHandler(getNews));
 router.get('/news/:slug', asyncHandler(getNewsBySlug));
-router.post('/news', authenticateJwt, upload.single('thumbnail'), asyncHandler(createNews));
-router.put('/news/:id', authenticateJwt, upload.single('thumbnail'), asyncHandler(updateNews));
+router.post('/news', authenticateJwt, rejectMultipart, asyncHandler(createNews));
+router.put('/news/:id', authenticateJwt, rejectMultipart, asyncHandler(updateNews));
 router.delete('/news/:id', authenticateJwt, asyncHandler(deleteNews));
 
-// Videos — two-way upload:
-//   * multipart with `videoFile` → device upload (Cloudinary when configured)
-//   * body/field `embedUrl` (or `youtubeUrl`) → YouTube / Vimeo link
-const videoUploadFields = upload.fields([
-  { name: 'videoFile', maxCount: 1 },
-  { name: 'video', maxCount: 1 },
-  { name: 'thumbnail', maxCount: 1 },
-]);
-
+// Videos — device uploads arrive as an already-stored Cloudinary asset,
+// links (YouTube / Vimeo) are parsed on the server.
 router.get('/videos', asyncHandler(getVideos));
-router.post('/videos', authenticateJwt, videoUploadFields, asyncHandler(createVideo));
-router.put('/videos/:id', authenticateJwt, upload.single('thumbnail'), asyncHandler(updateVideo));
-// Legacy endpoints (kept so older admin builds keep working)
-router.post('/videos/upload', authenticateJwt, videoUploadFields, asyncHandler(uploadVideo));
-router.post('/videos/embed', authenticateJwt, asyncHandler(embedVideo));
+router.post('/videos', authenticateJwt, rejectMultipart, asyncHandler(createVideo));
+router.put('/videos/:id', authenticateJwt, rejectMultipart, asyncHandler(updateVideo));
 router.get('/videos/stream/:id', asyncHandler(streamVideo));
 router.delete('/videos/:id', authenticateJwt, asyncHandler(deleteVideo));
 
 // Notices
 router.get('/notices', asyncHandler(getNotices));
-router.post('/notices', authenticateJwt, upload.single('pdfFile'), asyncHandler(createNotice));
-router.put('/notices/:id', authenticateJwt, upload.single('pdfFile'), asyncHandler(updateNotice));
+router.post('/notices', authenticateJwt, rejectMultipart, asyncHandler(createNotice));
+router.put('/notices/:id', authenticateJwt, rejectMultipart, asyncHandler(updateNotice));
 router.delete('/notices/:id', authenticateJwt, asyncHandler(deleteNotice));
 
 // Publications
 router.get('/publications', asyncHandler(getPublications));
-router.post(
-  '/publications',
-  authenticateJwt,
-  upload.fields([
-    { name: 'pdfFile', maxCount: 1 },
-    { name: 'thumbnail', maxCount: 1 },
-  ]),
-  asyncHandler(createPublication)
-);
-router.put('/publications/:id', authenticateJwt, upload.single('pdfFile'), asyncHandler(updatePublication));
+router.post('/publications', authenticateJwt, rejectMultipart, asyncHandler(createPublication));
+router.put('/publications/:id', authenticateJwt, rejectMultipart, asyncHandler(updatePublication));
 router.delete('/publications/:id', authenticateJwt, asyncHandler(deletePublication));
 
-// Gallery — strict image-only multipart handling. The legacy `coverImage` and
-// `image` field names remain accepted while the current UI can send batches.
+// Gallery
 router.get('/gallery/albums', asyncHandler(getAlbums));
-router.post(
-  '/gallery/albums',
-  authenticateJwt,
-  galleryUpload.fields([
-    { name: 'coverImage', maxCount: 1 },
-    { name: 'photos', maxCount: MAX_GALLERY_FILES },
-  ]),
-  asyncHandler(createAlbum)
-);
-router.put('/gallery/albums/:id', authenticateJwt, galleryUpload.single('coverImage'), asyncHandler(updateAlbum));
+router.post('/gallery/albums', authenticateJwt, rejectMultipart, asyncHandler(createAlbum));
+router.put('/gallery/albums/:id', authenticateJwt, rejectMultipart, asyncHandler(updateAlbum));
 router.delete('/gallery/albums/:id', authenticateJwt, asyncHandler(deleteAlbum));
 router.get('/gallery/albums/:id/photos', asyncHandler(getAlbumPhotos));
 router.get('/gallery/photos', asyncHandler(getAllPhotos));
-router.post(
-  '/gallery/albums/:id/photos',
-  authenticateJwt,
-  galleryUpload.fields([
-    { name: 'image', maxCount: MAX_GALLERY_FILES },
-    { name: 'images', maxCount: MAX_GALLERY_FILES },
-  ]),
-  asyncHandler(addPhoto)
-);
+router.post('/gallery/albums/:id/photos', authenticateJwt, rejectMultipart, asyncHandler(addPhoto));
 router.put('/gallery/photos/:id', authenticateJwt, asyncHandler(updatePhoto));
 router.delete('/gallery/photos/:id', authenticateJwt, asyncHandler(deletePhoto));
 
 // Committee / Governance
 router.get('/committee', asyncHandler(getCommittee));
 router.get('/committee/:type', asyncHandler(getCommittee));
-router.post('/committee', authenticateJwt, upload.single('photo'), asyncHandler(createCommitteeMember));
-router.put('/committee/:id', authenticateJwt, upload.single('photo'), asyncHandler(updateCommitteeMember));
+router.post('/committee', authenticateJwt, rejectMultipart, asyncHandler(createCommitteeMember));
+router.put('/committee/:id', authenticateJwt, rejectMultipart, asyncHandler(updateCommitteeMember));
 router.delete('/committee/:id', authenticateJwt, asyncHandler(deleteCommitteeMember));
 
 // Partners
 router.get('/partners', asyncHandler(getPartners));
-router.post('/partners', authenticateJwt, upload.single('logo'), asyncHandler(createPartner));
-router.put('/partners/:id', authenticateJwt, upload.single('logo'), asyncHandler(updatePartner));
+router.post('/partners', authenticateJwt, rejectMultipart, asyncHandler(createPartner));
+router.put('/partners/:id', authenticateJwt, rejectMultipart, asyncHandler(updatePartner));
 router.delete('/partners/:id', authenticateJwt, asyncHandler(deletePartner));
 
 // Career & Applications
 router.get('/career', asyncHandler(getCareers));
-router.post('/career', authenticateJwt, upload.single('pdfFile'), asyncHandler(createCareer));
-router.put('/career/:id', authenticateJwt, upload.single('pdfFile'), asyncHandler(updateCareer));
+router.post('/career', authenticateJwt, rejectMultipart, asyncHandler(createCareer));
+router.put('/career/:id', authenticateJwt, rejectMultipart, asyncHandler(updateCareer));
 router.delete('/career/:id', authenticateJwt, asyncHandler(deleteCareer));
-router.post('/career/apply', upload.single('cvFile'), asyncHandler(applyJob));
+router.post('/career/apply', rejectMultipart, asyncHandler(applyJob));
 router.get('/career/applications', authenticateJwt, asyncHandler(getApplications));
 router.delete('/career/applications/:id', authenticateJwt, asyncHandler(deleteApplication));
 // Backwards-compatible alias used by older admin builds
@@ -207,12 +205,9 @@ router.post('/stats', authenticateJwt, asyncHandler(createStat));
 router.put('/stats/:id', authenticateJwt, asyncHandler(updateStat));
 router.delete('/stats/:id', authenticateJwt, asyncHandler(deleteStat));
 
-// Direct File Upload (Cloudinary)
-router.post('/upload', authenticateJwt, upload.single('file'), asyncHandler(uploadDirectFile));
-
 // Settings (identity, contact, branch offices, social links, theme colors)
 router.get('/settings', asyncHandler(getSettings));
-router.put('/settings', authenticateJwt, requireAdmin, upload.single('logo'), asyncHandler(updateSettings));
+router.put('/settings', authenticateJwt, requireAdmin, rejectMultipart, asyncHandler(updateSettings));
 
 // Page content (Home & About editable copy)
 router.get('/page-content', asyncHandler(getPageContent));

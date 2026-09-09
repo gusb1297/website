@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { AdminAccount, AdminRole } from '../types';
 import {
   ShieldCheck,
@@ -60,6 +61,8 @@ export const ManageAdmins: React.FC = () => {
   const [editError, setEditError] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
+  const toast = useToast();
+
   const authHeaders = useCallback(
     (json = true) => ({
       ...(json ? { 'Content-Type': 'application/json' } : {}),
@@ -113,9 +116,12 @@ export const ManageAdmins: React.FC = () => {
       setPassword('');
       setRole('admin');
       setNotice(`নতুন অ্যাকাউন্ট তৈরি হয়েছে: ${data.email}`);
+      toast.success({ title: 'নতুন অ্যাডমিন যোগ হয়েছে', description: data.email });
       loadAdmins();
     } catch (err) {
-      setCreateError((err as Error).message);
+      const message = (err as Error).message;
+      setCreateError(message);
+      toast.error({ title: 'অ্যাডমিন যোগ করা যায়নি', description: message });
     } finally {
       setCreating(false);
     }
@@ -159,10 +165,13 @@ export const ManageAdmins: React.FC = () => {
       if (!res.ok) throw new Error(data.message || data.error || 'আপডেট করা যায়নি');
 
       setNotice(`${data.email} অ্যাকাউন্টটি আপডেট করা হয়েছে।`);
+      toast.success({ title: 'অ্যাকাউন্ট আপডেট হয়েছে', description: data.email });
       setEditing(null);
       loadAdmins();
     } catch (err) {
-      setEditError((err as Error).message);
+      const message = (err as Error).message;
+      setEditError(message);
+      toast.error({ title: 'অ্যাকাউন্ট আপডেট করা যায়নি', description: message });
     } finally {
       setSavingEdit(false);
     }
@@ -179,9 +188,10 @@ export const ManageAdmins: React.FC = () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || 'মুছে ফেলা যায়নি');
       setNotice(`${admin.email} অ্যাকাউন্টটি মুছে ফেলা হয়েছে।`);
+      toast.success({ title: 'অ্যাকাউন্ট মুছে ফেলা হয়েছে', description: admin.email });
       loadAdmins();
     } catch (err) {
-      alert((err as Error).message);
+      toast.error({ title: 'অ্যাকাউন্ট মুছে ফেলা যায়নি', description: (err as Error).message });
     }
   };
 

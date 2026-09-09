@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useFileInput } from '../hooks/useFileInput';
+import { AssetField } from '../components/admin/AssetField';
+import { jsonRequest } from '../utils/api';
+import { uploadQueueSize } from '../lib/upload';
+import type { AssetValue } from '../lib/upload';
 import { CareerCircular } from '../types';
 import {
   Briefcase,
@@ -8,7 +11,6 @@ import {
   Calendar,
   Users,
   FileText,
-  Upload,
   CheckCircle2,
   X,
   Send,
@@ -24,7 +26,7 @@ export const Career: React.FC = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const cvInput = useFileInput();
+  const [cvAsset, setCvAsset] = useState<AssetValue | null>(null);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -32,58 +34,46 @@ export const Career: React.FC = () => {
 
   const handleApplySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Read the file at submit time (state, falling back to the input itself)
-    // so the FormData always carries the file the browser is showing.
-    const cvFile = cvInput.getFile();
-    if (!cvFile) {
-      setErrorMsg('অনুগ্রহ করে আপনার সিভি (PDF ফরম্যাট) সিলেক্ট করুন।');
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!name.trim() || !email.trim() || !phone.trim()) {
+      setErrorMsg('নাম, ইমেইল ও মোবাইল নম্বর পূরণ করুন।');
+      return;
+    }
+    // The CV is uploaded to Cloudinary the moment it is picked, so this request
+    // only attaches the stored URL to the application.
+    if (!cvAsset?.url && uploadQueueSize() === 0) {
+      setErrorMsg('সিভি ফাইলটি বেছে নিন — আপলোড শেষ হলে আবেদন জমা দেওয়া যাবে।');
       return;
     }
 
     setSubmitting(true);
-    setErrorMsg('');
-    setSuccessMsg('');
-
     try {
-      const formData = new FormData();
-      formData.append('careerId', selectedCircular?.id || 'gen');
-      formData.append('name', name);
-      formData.append('email', email);
-      formData.append('phone', phone);
-      formData.append('notes', notes);
-      // Field name must match `upload.single('cvFile')` on the server.
-      formData.append('cvFile', cvFile, cvFile.name);
-
-      const res = await fetch('/api/career/apply', {
+      await jsonRequest('/api/career/apply', {
         method: 'POST',
-        // No Content-Type header: the browser sets multipart/form-data with the boundary.
-        body: formData,
+        body: {
+          careerId: selectedCircular?.id || 'gen',
+          name: name.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+          notes: notes.trim(),
+          cvFile: cvAsset,
+        },
       });
-
-      const json = await res.json();
-      if (!res.ok) {
-        // Public visitors should not see infrastructure details — keep the
-        // storage-refusal explanation for the admin, show a short message here.
-        const technical = typeof json.error === 'string' && /^[a-z0-9_]+$/i.test(json.error);
-        throw new Error(
-          res.status === 503
-            ? 'সিভি আপলোড এই মুহূর্তে সম্ভব হচ্ছে না। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন অথবা ইমেইলে সিভি পাঠান।'
-            : (!technical && json.error) || json.message || 'আবেদন জমা দিতে ব্যর্থ হয়েছে'
-        );
-      }
 
       setSuccessMsg('আপনার আবেদনপত্র ও সিভি সফলভাবে জমা হয়েছে। ধন্যবাদ!');
       setName('');
       setEmail('');
       setPhone('');
-      cvInput.reset();
+      setCvAsset(null);
       setNotes('');
-      setTimeout(() => {
+      window.setTimeout(() => {
         setApplyModalOpen(false);
         setSuccessMsg('');
       }, 3000);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'আবেদন জমা দিতে সমস্যা হয়েছে।');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'আবেদন জমা দিতে সমস্যা হয়েছে।');
     } finally {
       setSubmitting(false);
     }
@@ -272,26 +262,15 @@ export const Career: React.FC = () => {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    সিভি (CV) ফাইল আপলোড করুন (PDF) <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative border-2 border-dashed border-slate-300 rounded-2xl p-4 text-center hover:border-emerald-600 transition-colors bg-slate-50">
-                    <input
-                      ref={cvInput.inputRef}
-                      type="file"
-                      name="cvFile"
-                      required
-                      accept=".pdf,application/pdf"
-                      onChange={cvInput.onChange}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                    <Upload className="w-8 h-8 text-emerald-800 mx-auto mb-1" />
-                    <p className="text-xs font-bold text-slate-700">
-                      {cvInput.file ? cvInput.file.name : 'সিভি নির্বাচন করতে এখানে ক্লিক করুন (PDF)'}
-                    </p>
-                  </div>
-                </div>
+                <AssetField
+                  kind="cv"
+                  folder="cvs"
+                  required
+                  label="সিভি (CV) ফাইল আপলোড করুন"
+                  hint="PDF, DOC বা DOCX — সর্বোচ্চ ৫ MB"
+                  value={cvAsset}
+                  onChange={setCvAsset}
+                />
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">

@@ -1,88 +1,78 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useFileInput } from '../hooks/useFileInput';
-import { useAuth } from '../context/AuthContext';
+import { AssetField } from '../components/admin/AssetField';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
+import { uploadQueueSize } from '../lib/upload';
+import type { AssetValue } from '../lib/upload';
 import { HeroSlide } from '../types';
 import { Plus, Trash2, Eye, EyeOff, Edit3, X, Save } from 'lucide-react';
-import { readApiError } from '../utils/api';
 
 export const ManageHeroSlider: React.FC = () => {
-  const { token } = useAuth();
+  const toast = useToast();
+  const { saving: creating, run } = useSaveAction();
   const { data: slides, refetch } = useFetch<HeroSlide[]>('/api/hero-slides?all=true');
 
   const [headline, setHeadline] = useState('');
   const [subtext, setSubtext] = useState('');
   const [buttonText, setButtonText] = useState('');
   const [buttonLink, setButtonLink] = useState('/programs');
-  const imageInput = useFileInput();
-  const [creating, setCreating] = useState(false);
+  // The picture is uploaded to Cloudinary the moment it is picked, so this
+  // state already holds a stored asset (or nothing) — never a raw File.
+  const [imageAsset, setImageAsset] = useState<AssetValue | null>(null);
 
   const [editing, setEditing] = useState<HeroSlide | null>(null);
   const [editHeadline, setEditHeadline] = useState('');
   const [editSubtext, setEditSubtext] = useState('');
   const [editButtonText, setEditButtonText] = useState('');
   const [editButtonLink, setEditButtonLink] = useState('');
-  const editImageInput = useFileInput();
+  const [editImage, setEditImage] = useState<AssetValue | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Read the file at submit time (state, falling back to the input itself)
-    // so the FormData always carries the file the browser is showing.
-    const imageFile = imageInput.getFile();
-    if (!imageFile) {
-      alert('স্লাইডের জন্য একটি ছবি নির্বাচন করুন।');
+    if (!headline.trim() || !subtext.trim()) {
+      toast.error({ title: 'শিরোনাম ও সাবটেক্সট আবশ্যক' });
       return;
     }
-    setCreating(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('headline', headline);
-      formData.append('subtext', subtext);
-      formData.append('buttonText', buttonText);
-      formData.append('buttonLink', buttonLink);
-      formData.append('isActive', 'true');
-
-      // Field name must match `upload.single('image')` on the server.
-      formData.append('image', imageFile, imageFile.name);
-
-      const res = await fetch('/api/hero-slides', {
-        method: 'POST',
-        // No Content-Type here: the browser sets multipart/form-data with the boundary.
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
+    if (!imageAsset?.url && uploadQueueSize() === 0) {
+      toast.error({
+        title: 'ছবি নির্বাচন করা হয়নি',
+        description: 'ছবিটি বেছে নিন — বেছে নেওয়ার সাথে সাথেই Cloudinary-তে আপলোড হয়ে যাবে।',
       });
-
-      if (!res.ok) throw new Error(await readApiError(res, 'স্লাইড সংরক্ষণ ব্যর্থ হয়েছে'));
-
-      setHeadline('');
-      setSubtext('');
-      // Clears the native input too, so the next slide cannot show a stale file.
-      imageInput.reset();
-      refetch();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'স্লাইড যোগ করতে সমস্যা হয়েছে');
-    } finally {
-      setCreating(false);
+      return;
     }
+
+    const created = await run<HeroSlide>({
+      url: '/api/hero-slides',
+      body: {
+        headline: headline.trim(),
+        subtext: subtext.trim(),
+        buttonText: buttonText.trim(),
+        buttonLink: buttonLink.trim(),
+        isActive: true,
+        image: imageAsset,
+      },
+      success: 'নতুন হিরো স্লাইড যোগ হয়েছে',
+      failure: 'স্লাইড সংরক্ষণ করা যায়নি',
+    });
+    if (!created) return;
+
+    setHeadline('');
+    setSubtext('');
+    setButtonText('');
+    setImageAsset(null);
+    refetch();
   };
 
   const toggleActive = async (slide: HeroSlide) => {
-    try {
-      await fetch(`/api/hero-slides/${slide.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ isActive: !slide.isActive }),
-      });
-      refetch();
-    } catch (e) {
-      console.error(e);
-    }
+    const saved = await run<HeroSlide>({
+      url: `/api/hero-slides/${slide.id}`,
+      method: 'PUT',
+      body: { isActive: !slide.isActive },
+      success: slide.isActive ? 'স্লাইডটি নিষ্ক্রিয় করা হয়েছে' : 'স্লাইডটি সক্রিয় করা হয়েছে',
+      failure: 'অবস্থা পরিবর্তন করা যায়নি',
+    });
+    if (saved) refetch();
   };
 
   const startEdit = (slide: HeroSlide) => {
@@ -91,47 +81,40 @@ export const ManageHeroSlider: React.FC = () => {
     setEditSubtext(slide.subtext);
     setEditButtonText(slide.buttonText || '');
     setEditButtonLink(slide.buttonLink || '');
-    editImageInput.reset();
+    setEditImage(slide.image ? { url: slide.image, publicId: slide.imagePublicId } : null);
   };
 
   const handleSaveEdit = async () => {
     if (!editing) return;
-    try {
-      const formData = new FormData();
-      formData.append('headline', editHeadline);
-      formData.append('subtext', editSubtext);
-      formData.append('buttonText', editButtonText);
-      formData.append('buttonLink', editButtonLink);
-      formData.append('isActive', String(editing.isActive));
-      const editImageFile = editImageInput.getFile();
-      if (editImageFile) {
-        formData.append('image', editImageFile, editImageFile.name);
-      }
-      const res = await fetch(`/api/hero-slides/${editing.id}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'স্লাইড আপডেট করা যায়নি'));
-      setEditing(null);
-      editImageInput.reset();
-      refetch();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
-    }
+    const saved = await run<HeroSlide>({
+      url: `/api/hero-slides/${editing.id}`,
+      method: 'PUT',
+      body: {
+        headline: editHeadline.trim(),
+        subtext: editSubtext.trim(),
+        buttonText: editButtonText.trim(),
+        buttonLink: editButtonLink.trim(),
+        isActive: editing.isActive,
+        image: editImage,
+      },
+      success: 'স্লাইড আপডেট হয়েছে',
+      failure: 'স্লাইড আপডেট করা যায়নি',
+    });
+    if (!saved) return;
+    setEditing(null);
+    setEditImage(null);
+    refetch();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('আপনি কি এই স্লাইডটি ডিলিট করতে চান?')) return;
-    try {
-      await fetch(`/api/hero-slides/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refetch();
-    } catch (e) {
-      console.error(e);
-    }
+    const done = await run({
+      url: `/api/hero-slides/${id}`,
+      method: 'DELETE',
+      success: 'স্লাইডটি মুছে ফেলা হয়েছে',
+      failure: 'স্লাইড মুছে ফেলা যায়নি',
+    });
+    if (done !== null) refetch();
   };
 
   return (
@@ -190,19 +173,14 @@ export const ManageHeroSlider: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">ছবি ফাইল আপলোড করুন (Direct Upload)</label>
-              <input
-                ref={imageInput.inputRef}
-                type="file"
-                name="image"
+              <AssetField
+                kind="image"
+                folder="hero"
+                label="স্লাইডের ছবি"
                 required
-                accept="image/*"
-                onChange={imageInput.onChange}
-                className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
+                value={imageAsset}
+                onChange={setImageAsset}
               />
-              {imageInput.file && (
-                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {imageInput.file.name}</p>
-              )}
             </div>
           </div>
 
@@ -296,13 +274,13 @@ export const ManageHeroSlider: React.FC = () => {
                     className="px-3 py-2 rounded-lg text-xs border border-slate-300"
                     placeholder="বাটন লিঙ্ক (যেমন: /programs)"
                   />
-                  <input
-                    ref={editImageInput.inputRef}
-                    type="file"
-                    name="image"
-                    accept="image/*"
-                    onChange={editImageInput.onChange}
-                    className="px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg"
+                  <AssetField
+                    kind="image"
+                    folder="hero"
+                    compact
+                    className="md:col-span-2"
+                    value={editImage}
+                    onChange={setEditImage}
                   />
                   <div className="md:col-span-2 flex gap-2">
                     <button

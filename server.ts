@@ -14,8 +14,8 @@ import {
 } from './server/config/persistence';
 import { connectMongo, describeMongoStatus, startMongoReconnectLoop } from './server/config/mongo';
 import { bootstrapAdminFromEnv } from './server/services/adminService';
-import { getJwtSecret, isCloudStorageRequired, isEphemeralHost } from './server/config/env';
-import { StorageError, describeStorageStatus, verifyCloudinaryConnection } from './server/config/cloudinary';
+import { getJwtSecret, isEphemeralHost } from './server/config/env';
+import { StorageError, describeStorageStatus, verifyStorageConnection } from './server/services/storage';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -40,14 +40,16 @@ function notFoundHandler(req: express.Request, res: express.Response) {
   res.status(404).json({ error: 'Not found' });
 }
 
-function errorHandler(err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) {
-  console.error('[server] Unhandled error:', err);
-
+function errorHandler(err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) {
   // Upload refused because it could not be stored durably (no Cloudinary on an
-  // ephemeral host, or Cloudinary rejected the file). Tell the admin exactly why.
+  // ephemeral host, or Cloudinary rejected the file). This is an expected,
+  // already-explained condition: log one line, not a stack trace.
   if (err instanceof StorageError) {
+    console.warn('[upload] refused:', err.message.split('\n')[0]);
     return res.status(err.status).json({ error: err.code, message: err.message });
   }
+
+  console.error('[server] Unhandled error:', err);
 
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
@@ -59,22 +61,23 @@ function errorHandler(err: Error, _req: express.Request, res: express.Response, 
     if (err.code === 'LIMIT_FILE_COUNT') {
       return res.status(400).json({
         error: 'too_many_files',
-        message: 'একবারে অনুমোদিত সংখ্যার চেয়ে বেশি ফাইল নির্বাচন করা হয়েছে।',
+        message: 'একবারে একটি ফাইল আপলোড করা যাবে। এক এক করে ফাইল দিন।',
       });
     }
     return res.status(400).json({
       error: 'invalid_upload',
-      message: 'ফাইল আপলোডের তথ্য সঠিক নয়। ফাইলগুলো আবার নির্বাচন করুন।',
+      message: 'ফাইল আপলোডের তথ্য সঠিক নয়। ফাইলটি আবার নির্বাচন করুন।',
     });
   }
 
   const status = (err as { status?: number }).status || 500;
   const rawMessage = (err as { message?: string }).message || 'Internal server error';
   if (status < 500) {
-    const message = rawMessage.startsWith('invalid_image_type:')
-      ? 'শুধু JPG, JPEG, PNG, WEBP অথবা GIF ছবি আপলোড করা যাবে।'
-      : rawMessage;
-    return res.status(status).json({ error: 'invalid_upload', message });
+    console.warn(`[server] ${status} ${req.method} ${req.originalUrl}: ${rawMessage.split('\n')[0]}`);
+    // Upload rejections carry a machine code + a user text: `invalid_file_type: …`
+    const message = /^[a-z_]+: /.test(rawMessage) ? rawMessage.slice(rawMessage.indexOf(': ') + 2) : rawMessage;
+    const code = (err as { code?: string }).code;
+    return res.status(status).json({ error: code || 'invalid_upload', message });
   }
   res.status(500).json({ error: 'Internal server error', message: 'সার্ভারে সমস্যা হয়েছে। আবার চেষ্টা করুন।' });
 }
@@ -90,12 +93,13 @@ async function startServer() {
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-  // Static uploads directory
+  // Legacy files: records created before the Cloudinary migration may still
+  // point at /uploads/*. Those are served read-only — nothing is ever written
+  // here any more, every new upload goes straight to Cloudinary.
   const uploadsPath = path.join(process.cwd(), 'uploads');
-  if (!fs.existsSync(uploadsPath)) {
-    fs.mkdirSync(uploadsPath, { recursive: true });
+  if (fs.existsSync(uploadsPath)) {
+    app.use('/uploads', express.static(uploadsPath, { maxAge: isProduction ? '30d' : 0, immutable: isProduction }));
   }
-  app.use('/uploads', express.static(uploadsPath, { maxAge: isProduction ? '7d' : 0 }));
 
   // Warm the in-memory store from the local JSON cache first (instant boot);
   // MongoDB — the source of truth — is layered on top right after connecting.
@@ -127,19 +131,16 @@ async function startServer() {
     await bootstrapAdminFromEnv();
   });
 
-  // File storage: Cloudinary keeps uploads across deploys. Verify the
+  // File storage: Cloudinary is the only place media is kept. Verify the
   // credentials at boot so a typo shows up here instead of at the first upload.
-  const cloudinaryOk = await verifyCloudinaryConnection();
+  const cloudinaryOk = await verifyStorageConnection();
   if (!cloudinaryOk) {
-    if (isCloudStorageRequired()) {
-      console.error(
-        '[storage] WARNING: Cloudinary is not configured (or unreachable). Image/PDF/video uploads will be ' +
-          'REFUSED with a clear error, because files written to this server\'s local disk are deleted on every ' +
-          'deploy/restart. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.'
-      );
-    } else {
-      console.warn('[storage] Cloudinary is not configured — uploads are kept on the local disk (development mode).');
-    }
+    console.error(
+      '[storage] WARNING: Cloudinary is not configured (or unreachable). Every image/video/PDF upload will be ' +
+        'refused with a clear message until CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET ' +
+        '(or CLOUDINARY_URL) are set. Local ./uploads storage has been removed on purpose: files written to an ' +
+        'ephemeral host disappear on the next deploy.'
+    );
   }
 
   // Healthcheck endpoint (before the API router). Also reports whether
@@ -156,9 +157,8 @@ async function startServer() {
         provider: storage.provider,
         configured: storage.configured,
         durable: storage.durable,
-        cloudRequired: storage.cloudRequired,
-        ephemeralHost: storage.ephemeralHost,
         cloudName: storage.cloudName,
+        folder: storage.folder,
         lastCheck: storage.lastCheck,
         hint: storage.hint,
       },

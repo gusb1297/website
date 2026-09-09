@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useFileInput } from '../hooks/useFileInput';
-import { useAuth } from '../context/AuthContext';
+import { AssetField } from '../components/admin/AssetField';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
+import { uploadQueueSize } from '../lib/upload';
+import type { AssetValue } from '../lib/upload';
 import { Program } from '../types';
 import { Plus, Trash2, Edit3, X, Save } from 'lucide-react';
-import { readApiError } from '../utils/api';
 
 const ICON_OPTIONS = ['Coins', 'HeartPulse', 'GraduationCap', 'Sprout', 'Building', 'Award', 'School', 'MapPin'];
 
 export const ManagePrograms: React.FC = () => {
-  const { token } = useAuth();
+  const toast = useToast();
+  const { saving: submitting, run } = useSaveAction();
   const { data: programs, refetch } = useFetch<Program[]>('/api/programs');
 
   const [title, setTitle] = useState('');
@@ -19,9 +22,8 @@ export const ManagePrograms: React.FC = () => {
   const [status, setStatus] = useState<'ongoing' | 'completed'>('ongoing');
   const [beneficiariesCount, setBeneficiariesCount] = useState(10000);
   const [districtsCovered, setDistrictsCovered] = useState(5);
-  const coverInput = useFileInput();
+  const [coverAsset, setCoverAsset] = useState<AssetValue | null>(null);
   // URL input removed - direct upload only
-  const [submitting, setSubmitting] = useState(false);
 
   const [editing, setEditing] = useState<Program | null>(null);
   const [editTitle, setEditTitle] = useState('');
@@ -31,53 +33,47 @@ export const ManagePrograms: React.FC = () => {
   const [editStatus, setEditStatus] = useState<'ongoing' | 'completed'>('ongoing');
   const [editBeneficiaries, setEditBeneficiaries] = useState(0);
   const [editDistricts, setEditDistricts] = useState(0);
-  const editCoverInput = useFileInput();
+  const [editCover, setEditCover] = useState<AssetValue | null>(null);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Read the file at submit time (state, falling back to the input itself)
-    // so the FormData always carries the file the browser is showing.
-    const coverFile = coverInput.getFile();
-    if (!coverFile) {
-      alert('প্রজেক্টের কভার ছবি নির্বাচন করুন।');
+    if (!title.trim() || !shortDesc.trim() || !content.trim()) {
+      toast.error({ title: 'শিরোনাম, সংক্ষিপ্ত বিবরণ ও মূল লেখা লিখুন' });
       return;
     }
-    setSubmitting(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('title', title);
-      formData.append('shortDesc', shortDesc);
-      formData.append('content', content);
-      formData.append('icon', icon);
-      formData.append('status', status);
-      formData.append('beneficiariesCount', String(beneficiariesCount));
-      formData.append('districtsCovered', String(districtsCovered));
-
-      // Field name must match `upload.single('coverImage')` on the server.
-      formData.append('coverImage', coverFile, coverFile.name);
-
-      const res = await fetch('/api/programs', {
-        method: 'POST',
-        // No Content-Type here: the browser sets multipart/form-data with the boundary.
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+    if (!coverAsset?.url && uploadQueueSize() === 0) {
+      toast.error({
+        title: 'কভার ছবি নির্বাচন করুন',
+        description: 'ছবি বেছে নিলেই সেটি সরাসরি Cloudinary-তে আপলোড হয়ে যাবে।',
       });
-
-      if (!res.ok) throw new Error(await readApiError(res, 'প্রজেক্ট যোগ করতে ব্যর্থ হয়েছে'));
-
-      setTitle('');
-      setShortDesc('');
-      setContent('');
-      // Clears the native input too, so the next project cannot show a stale file.
-      coverInput.reset();
-      refetch();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
-    } finally {
-      setSubmitting(false);
+      return;
     }
+
+    const created = await run<Program>({
+      url: '/api/programs',
+      body: {
+        title: title.trim(),
+        shortDesc: shortDesc.trim(),
+        content: content.trim(),
+        icon,
+        status,
+        beneficiariesCount,
+        districtsCovered,
+        coverImage: coverAsset,
+      },
+      success: 'প্রজেক্ট যোগ হয়েছে',
+      failure: 'প্রজেক্ট সংরক্ষণ করা যায়নি',
+    });
+    if (!created) return;
+
+    setTitle('');
+    setShortDesc('');
+    setContent('');
+    setCoverAsset(null);
+    refetch();
   };
+
 
   const startEdit = (prog: Program) => {
     setEditing(prog);
@@ -88,49 +84,44 @@ export const ManagePrograms: React.FC = () => {
     setEditStatus(prog.status);
     setEditBeneficiaries(prog.beneficiariesCount || 0);
     setEditDistricts(prog.districtsCovered || 0);
-    editCoverInput.reset();
+    setEditCover(prog.coverImage ? { url: prog.coverImage, publicId: prog.coverImagePublicId } : null);
   };
+
 
   const handleSaveEdit = async () => {
     if (!editing) return;
-    try {
-      const formData = new FormData();
-      formData.append('title', editTitle);
-      formData.append('shortDesc', editShortDesc);
-      formData.append('content', editContent);
-      formData.append('icon', editIcon);
-      formData.append('status', editStatus);
-      formData.append('beneficiariesCount', String(editBeneficiaries));
-      formData.append('districtsCovered', String(editDistricts));
-      const editCoverFile = editCoverInput.getFile();
-      if (editCoverFile) {
-        formData.append('coverImage', editCoverFile, editCoverFile.name);
-      }
-      const res = await fetch(`/api/programs/${editing.id}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'প্রজেক্ট আপডেট করা যায়নি'));
-      setEditing(null);
-      editCoverInput.reset();
-      refetch();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
-    }
+    const saved = await run<Program>({
+      url: `/api/programs/${editing.id}`,
+      method: 'PUT',
+      body: {
+        title: editTitle.trim(),
+        shortDesc: editShortDesc.trim(),
+        content: editContent,
+        icon: editIcon,
+        status: editStatus,
+        beneficiariesCount: editBeneficiaries,
+        districtsCovered: editDistricts,
+        coverImage: editCover,
+      },
+      success: 'প্রজেক্ট আপডেট হয়েছে',
+      failure: 'প্রজেক্ট আপডেট করা যায়নি',
+    });
+    if (!saved) return;
+    setEditing(null);
+    setEditCover(null);
+    refetch();
   };
+
 
   const handleDelete = async (id: string) => {
     if (!confirm('আপনি কি এই প্রজেক্টটি ডিলিট করতে চান?')) return;
-    try {
-      await fetch(`/api/programs/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refetch();
-    } catch (e) {
-      console.error(e);
-    }
+    const done = await run({
+      url: `/api/programs/${id}`,
+      method: 'DELETE',
+      success: 'প্রজেক্টটি মুছে ফেলা হয়েছে',
+      failure: 'প্রজেক্ট মুছে ফেলা যায়নি',
+    });
+    if (done !== null) refetch();
   };
 
   const iconSelect = (value: string, onChange: (v: string) => void) => (
@@ -226,19 +217,13 @@ export const ManagePrograms: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">কভার ইমেজ আপলোড (Direct Upload)</label>
-              <input
-                ref={coverInput.inputRef}
-                type="file"
-                name="coverImage"
-                required
-                accept="image/*"
-                onChange={coverInput.onChange}
-                className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
+              <AssetField
+                kind="image"
+                folder="programs"
+                label="কভার ছবি"
+                value={coverAsset}
+                onChange={setCoverAsset}
               />
-              {coverInput.file && (
-                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {coverInput.file.name}</p>
-              )}
             </div>
 
 
@@ -290,8 +275,14 @@ export const ManagePrograms: React.FC = () => {
                   </div>
                   <input type="number" value={editBeneficiaries} onChange={(e) => setEditBeneficiaries(Number(e.target.value))} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="উপকৃত সংখ্যা" />
                   <input type="number" value={editDistricts} onChange={(e) => setEditDistricts(Number(e.target.value))} className="px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="জেলা সংখ্যা" />
-                  <input ref={editCoverInput.inputRef} type="file" name="coverImage" accept="image/*" onChange={editCoverInput.onChange} className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" />
-                  <div className="col-span-2 flex gap-2">
+                  <AssetField
+                    kind="image"
+                    folder="programs"
+                    compact
+                    value={editCover}
+                    onChange={setEditCover}
+                  />
+<div className="col-span-2 flex gap-2">
                     <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">
                       <Save className="w-3.5 h-3.5" /> আপডেট সেভ করুন
                     </button>

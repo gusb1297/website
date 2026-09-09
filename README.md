@@ -72,12 +72,14 @@ Open **http://localhost:3000** for the public site and **http://localhost:3000/a
 | --- | --- | --- |
 | Admin accounts | MongoDB (`admins`) | nobody can log in |
 | **All site content** (slides, programs, news, videos, gallery records, notices, publications, committee, partners, stats, settings, page copy, CV applications) | MongoDB (`sitecontents`, one document) — `data/store.json` is only a cache | content lives only in `data/store.json` and **is wiped on every deploy** on Render/Heroku/Railway |
-| **Uploaded files** (images, PDFs, videos) | Cloudinary | in production / on an ephemeral host the upload is **refused** with an explanatory error; in development files go to `./uploads` |
+| **Uploaded files** (images, videos, PDFs, applicant CVs) | Cloudinary only | every upload is **refused** with an explanatory (Bengali) error — there is deliberately **no local-disk fallback any more** |
 
-> **Why photos used to disappear after every update:** Render (and similar hosts) give the app a fresh
-> container on each deploy. Anything written to the local disk — `uploads/*.jpg` and `data/store.json`
-> — is gone. The fix is to keep content in MongoDB and files in Cloudinary. Both are now enforced and
-> visible: the admin dashboard shows a red banner until both are configured correctly.
+> **Why photos used to disappear after every update:** the old upload code wrote the file into
+> `./uploads` on the container's own disk whenever Cloudinary was missing, returned HTTP 200 and showed a
+> green message — and the next deploy wiped the folder. That fallback has been **deleted**: `server/services/storage.ts`
+> has exactly one destination (Cloudinary). If it is not configured, `POST /api/uploads/*` answers
+> **503 with the reason**, the picker shows a red toast, and nothing is saved — silence is now impossible.
+> The admin dashboard also shows a red banner until Cloudinary **and** MongoDB are configured correctly.
 
 ### Minimum environment for a live server (Render → *Environment*)
 
@@ -93,8 +95,8 @@ CLOUDINARY_API_SECRET=<from cloudinary.com dashboard>
 After saving the variables, redeploy once and open **/admin** — the banner at the top should turn green
 (“সব ঠিক আছে”). `GET /api/health` returns `storage.durable: true` and `content.durable: true`.
 
-Optional: `REQUIRE_CLOUD_STORAGE=false` allows local-disk uploads on a VPS with a real persistent disk;
-`REQUIRE_CLOUD_STORAGE=true` forces the Cloudinary requirement even in development.
+There is nothing to switch on: local-disk storage no longer exists in the code base, so the same
+Cloudinary rules apply in development and in production.
 
 ## 🔐 Admin accounts
 
@@ -233,17 +235,24 @@ routes, serves `/api` and `/uploads`, and enables HSTS + long-lived static cachi
 
 ```
 server/
-  config/        cloudinary, ffmpeg, multer, mongo, persistence (JSON store)
+  config/        mongo, persistence (JSON cache), env (JWT secret, ephemeral-host check)
   controllers/   all API handlers (CRUD + auth + settings + page-content)
-  middleware/    auth (JWT), rate limiting
+                 uploadController.ts — returns the Cloudinary asset / discards an orphan
+  middleware/    auth (JWT), rate limiting, upload.ts (multer → Cloudinary, JSON-only guard)
   models/        mongoose schemas (incl. Admin) + empty content store
-  services/      admin account service (MongoDB CRUD + bootstrap + first-run setup)
+  services/      adminService (MongoDB CRUD + bootstrap + first-run setup)
+                 storage.ts — the ONE place files are written (Cloudinary, no fallback)
+  utils/         assets.ts (asset refs in JSON bodies + release-on-replace/delete)
   routes/api.ts  all /api routes
 scripts/create-admin.ts  CLI to add an admin (`npm run create-admin`)
 src/
   admin/         admin dashboard + per-module managers
   components/    Navbar, Footer, HeroSlider, StatsCounter, cards, map, video, PDF
-  context/       Auth, Language, Settings (applies theme colors)
+                 admin/AssetField.tsx      single-file picker (upload on pick + preview)
+                 admin/AssetBatchField.tsx multi-image picker for the gallery
+  context/       Auth, Language, Settings (applies theme colors), Toast (upload feedback)
+  hooks/         useFetch (reads), useSaveAction (saves + toasts + 401 handling)
+  lib/upload.ts  XHR uploader (progress, abort, validation, limits from the server)
   pages/         public routes
   types/         shared TypeScript interfaces
 server.ts        Express app (security, persistence, vite dev / static prod)
@@ -263,16 +272,40 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 | `BOOTSTRAP_ADMIN_NAME` | no | Display name of the first admin |
 | `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET` | **yes in prod** | Cloudinary for all uploads (incl. video). Without it, production uploads are refused |
 | `CLOUDINARY_URL` | no | Alternative single-string Cloudinary credential |
-| `REQUIRE_CLOUD_STORAGE` | no | `true`/`false` — override the "uploads must go to Cloudinary" rule (default: on in production / ephemeral hosts) |
-| `MAX_UPLOAD_MB` | no (default 512) | Maximum size of a single general upload |
-| `MAX_IMAGE_UPLOAD_MB` | no (default 10) | Maximum size of each Photo Gallery image |
+| `CLOUDINARY_FOLDER` | no (default `vdo_bogura`) | Root folder inside the Cloudinary media library; each kind gets a sub-folder (`gallery`, `hero`, `videos`, …) |
+| `MAX_IMAGE_UPLOAD_MB` | no (default 10) | Max size of one image (gallery, hero, thumbnails, logos) |
+| `MAX_VIDEO_UPLOAD_MB` | no (default 512) | Max size of one uploaded video (`MAX_UPLOAD_MB` is still accepted as the legacy name) |
+| `MAX_DOCUMENT_UPLOAD_MB` | no (default 25) | Max size of an admin PDF / DOCX (notices, publications, circulars) |
+| `MAX_APPLICATION_UPLOAD_MB` | no (default 5) | Max size of a CV uploaded by a job applicant (public endpoint) |
 
 ## 📄 API overview (all under `/api`)
 
 `health` (Mongo / Cloudinary / content-persistence status), `auth/status` (Mongo + whether first-run setup is needed), `auth/setup` (create the first admin when the collection is empty), `auth/login`, `auth/me`, `admins` (GET/POST/PUT/DELETE, admin role only), `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
 `gallery/albums` (+ `/photos`), `committee`, `partners`, `career` (+ `/applications`),
-`stats`, `settings`, `page-content`. Public reads are open; writes require a valid admin JWT
-(settings & page-content additionally require the `admin` role).
+`stats`, `settings`, `page-content`, plus the upload endpoints `uploads/image`, `uploads/logo`,
+`uploads/video`, `uploads/document`, `uploads/cv`, `uploads/limits` and `uploads/discard`.
+Public reads are open; writes require a valid admin JWT (settings & page-content additionally require the
+`admin` role).
+
+### How an upload works now
+
+```
+admin picks a file →  POST /api/uploads/<kind>  (multipart, one file)
+                      → streamed to Cloudinary  → 201 { url, publicId, resourceType, bytes, … }
+                      → picker shows progress + a toast, keeps the returned asset in form state
+admin presses Save   →  POST/PUT /api/<entity>   (plain JSON: { title, thumbnail: {url, publicId}, … })
+```
+
+* The file is uploaded **the moment it is selected** — no hidden "staged" file that only
+  travels when the form is saved, which is what used to fail quietly.
+* Success **and** failure produce a toast (`src/context/ToastContext.tsx`); a failed upload never
+  leaves the form looking ready.
+* `publicId` is stored next to every URL so that replacing or deleting a record also destroys the
+  Cloudinary file (`server/utils/assets.ts` → `releaseAsset`). Uploaded-but-abandoned files are freed
+  through `uploads/discard`.
+* Entity endpoints are **JSON only**: a browser tab still running the previous bundle gets a
+  `415 stale_client` answer that tells the admin to hard-reload instead of saving an empty record.
+* `GET /api/uploads/limits` returns the server-side ceilings so the pickers validate the same sizes.
 
 ## 🎬 Two-way video upload
 
@@ -281,7 +314,7 @@ video library (Home highlight + Gallery → ভিডিও গ্যালা�
 
 | Way | How | Where the file lives | Thumbnail |
 | --- | --- | --- | --- |
-| **Device upload** | Drag & drop / pick an MP4, WebM, MOV, MKV… (up to `MAX_UPLOAD_MB`, default 512 MB). A progress bar shows the upload and can be cancelled. | **Cloudinary** (chunked `upload_large`). In development without credentials: `uploads/videos/` on the server; in production the upload is refused until Cloudinary is configured | Auto poster frame from Cloudinary (`so_2`), or ffmpeg locally; a custom image can be uploaded instead |
+| **Device upload** | Drag & drop / pick an MP4, WebM, MOV, MKV… (up to `MAX_VIDEO_UPLOAD_MB`, default 512 MB). The file starts uploading immediately with a progress bar that can be cancelled. | **Cloudinary** (chunked `upload_large`). Without credentials the upload is refused (503) — in development as well as in production | Auto poster frame from Cloudinary (`so_2`); a custom image can be uploaded instead |
 | **YouTube / Vimeo link** | Paste any URL: `watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`, `player.vimeo.com/…`, even a bare 11-char YouTube id. `?t=90` start offsets are preserved. | Nothing is stored — the video is embedded from the provider | `https://i.ytimg.com/vi/<id>/hqdefault.jpg` automatically (overridable) |
 
 ### Enabling Cloudinary
@@ -292,27 +325,32 @@ CLOUDINARY_API_KEY="123456789012345"
 CLOUDINARY_API_SECRET="your-secret"
 ```
 
-Put these in `.env` (loaded automatically) and restart. Uploaded videos then get a Cloudinary CDN URL,
-`/api/videos/stream/:id` 302-redirects to it, and deleting a video also destroys the Cloudinary asset.
-Without credentials, development keeps working on local disk with HTTP-range streaming; production
-refuses device uploads (YouTube/Vimeo links still work since nothing is stored).
+Put these in `.env` (loaded automatically) and restart — `GET /api/health` should then report
+`storage.durable: true`. Uploaded videos get a Cloudinary CDN URL, `/api/videos/stream/:id`
+302-redirects to it, and deleting a video also destroys the Cloudinary asset. Without credentials every
+device upload is refused (YouTube/Vimeo links keep working, since nothing is stored for them).
 
 ### Video API
 
 | Method | Endpoint | Body |
 | --- | --- | --- |
 | `GET` | `/api/videos` | – |
-| `POST` | `/api/videos` | multipart with `videoFile` (+ optional `thumbnail`) **or** `embedUrl` / `youtubeUrl`; plus `title`, `category`, `description` |
-| `PUT` | `/api/videos/:id` | `title`, `category`, `description`, `embedUrl`, `thumbnail` |
-| `DELETE` | `/api/videos/:id` | – (also removes the Cloudinary / local asset) |
-| `GET` | `/api/videos/stream/:id` | Range-enabled streaming (redirects to Cloudinary when remote) |
-
-Legacy `POST /api/videos/upload` and `POST /api/videos/embed` still work.
+| `POST` | `/api/videos` | JSON: `title`, `description`, `category`, `type: 'upload'` + `filePath` (the asset from `/api/uploads/video`, or its URL), **or** `type: 'embed'` + `embedUrl`/`youtubeUrl`. `duration` is taken from Cloudinary; `type` is also detected from what the form sent |
+| `PUT` | `/api/videos/:id` | same fields (JSON); a new `filePath` releases the previous asset |
+| `DELETE` | `/api/videos/:id` | – (also destroys the Cloudinary asset) |
+| `GET` | `/api/videos/stream/:id` | redirects to Cloudinary (or to the embed page) |
 
 ## 🖼️ Photo Gallery uploads
 
-Gallery writes require a valid admin/editor JWT. `POST /api/gallery/albums` accepts `title`, optional
-`description`, and up to 20 multipart `photos` (an album can also be created without a photo). The
-first photo becomes the cover. Add more images with `POST /api/gallery/albums/:id/photos` using the
-multipart `images` field. JPG/JPEG, PNG, WEBP and GIF are accepted; MIME, extension, byte signature,
-and the `MAX_IMAGE_UPLOAD_MB` per-file limit are all enforced by the server.
+Gallery writes require a valid admin/editor JWT. Every picture is uploaded on its own through
+`POST /api/uploads/image?folder=gallery`, so the album endpoints are plain JSON:
+
+| Method | Endpoint | Body |
+| --- | --- | --- |
+| `POST` | `/api/gallery/albums` | `title`, optional `description`, optional `photos: [{ url, publicId, caption? }]`, optional `cover` (defaults to the first photo) |
+| `PUT` | `/api/gallery/albums/:id` | `title`, `description`, `cover` |
+| `POST` | `/api/gallery/albums/:id/photos` | `photos: [{ url, publicId }]` (+ one shared `caption`, or a `captions[]` per photo) |
+| `DELETE` | `/api/gallery/photos/:id` / `/api/gallery/albums/:id` | – (destroys the Cloudinary file once no record refers to it) |
+
+`MAX_GALLERY_PHOTOS` (40) pictures per request are accepted; JPG/JPEG, PNG, WEBP, AVIF and GIF pass the
+server's MIME/extension check and the `MAX_IMAGE_UPLOAD_MB` per-file limit.

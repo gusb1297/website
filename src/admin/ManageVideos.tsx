@@ -1,12 +1,14 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useFileInput } from '../hooks/useFileInput';
-import { useAuth } from '../context/AuthContext';
+import { AssetField } from '../components/admin/AssetField';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
+import { uploadQueueSize } from '../lib/upload';
+import type { AssetValue } from '../lib/upload';
 import { VideoItem } from '../types';
 import { formatBytes, previewVideoLink, videoSourceLabel } from '../utils/video';
 import {
   Video,
-  UploadCloud,
   Trash2,
   Link as LinkIcon,
   Film,
@@ -25,7 +27,8 @@ type UploadMode = 'device' | 'link';
 const CATEGORY_OPTIONS = ['প্রামাণ্যচিত্র', 'সাফল্যের গল্প', 'মাঠপর্যায়ের কাজ', 'ইভেন্ট', 'প্রশিক্ষণ', 'সচেতনতা'];
 
 export const ManageVideos: React.FC = () => {
-  const { token, handleAuthError } = useAuth();
+  const toast = useToast();
+  const { saving: submitting, run } = useSaveAction();
   const { data: videos, refetch } = useFetch<VideoItem[]>('/api/videos');
 
   const [mode, setMode] = useState<UploadMode>('device');
@@ -33,23 +36,15 @@ export const ManageVideos: React.FC = () => {
   const [category, setCategory] = useState(CATEGORY_OPTIONS[0]);
   const [description, setDescription] = useState('');
 
-  // Device upload state
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  // Optional poster image. The device and link panels each render their own
-  // <input type="file">, so each gets its own controller; only the input of the
-  // active mode is mounted, and the submit handler reads from that one.
-  const thumbnailInput = useFileInput();
-  const linkThumbnailInput = useFileInput();
-  const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const xhrRef = useRef<XMLHttpRequest | null>(null);
+  // Media is pushed to Cloudinary the moment it is chosen, so the form only ever
+  // deals with the returned asset (url + public id) — never with a File, and
+  // never with "a file that was picked but somehow never uploaded".
+  const [videoAsset, setVideoAsset] = useState<AssetValue | null>(null);
+  const [thumbnailAsset, setThumbnailAsset] = useState<AssetValue | null>(null);
+  const [linkThumbnailAsset, setLinkThumbnailAsset] = useState<AssetValue | null>(null);
 
   // Link state
   const [embedUrl, setEmbedUrl] = useState('');
-
-  const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   // Inline editing of an existing item
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -57,136 +52,64 @@ export const ManageVideos: React.FC = () => {
   const [editCategory, setEditCategory] = useState('');
 
   const linkPreview = useMemo(() => previewVideoLink(embedUrl), [embedUrl]);
-  const localPreviewUrl = useMemo(() => (videoFile ? URL.createObjectURL(videoFile) : null), [videoFile]);
 
   const resetForm = () => {
     setTitle('');
     setDescription('');
     setEmbedUrl('');
-    setVideoFile(null);
-    // Clears the native inputs as well as the state, so the same files can be
-    // re-selected and no stale file name is displayed after a successful upload.
-    thumbnailInput.reset();
-    linkThumbnailInput.reset();
-    setProgress(0);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    setVideoAsset(null);
+    setThumbnailAsset(null);
+    setLinkThumbnailAsset(null);
   };
 
-  const pickDroppedFile = (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('video/')) {
-      setMessage({ kind: 'err', text: 'শুধুমাত্র ভিডিও ফাইল দেওয়া যাবে (MP4, WebM, MOV…)' });
-      return;
-    }
-    setMessage(null);
-    setVideoFile(file);
-    if (!title) setTitle(file.name.replace(/\.[^.]+$/, ''));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage(null);
 
     if (!title.trim()) {
-      setMessage({ kind: 'err', text: 'ভিডিও শিরোনাম লিখুন।' });
+      toast.error({ title: 'ভিডিওর শিরোনাম লিখুন' });
       return;
     }
-    if (mode === 'device' && !videoFile) {
-      setMessage({ kind: 'err', text: 'ডিভাইস থেকে একটি ভিডিও ফাইল নির্বাচন করুন।' });
+    if (mode === 'device' && !videoAsset?.url && uploadQueueSize() === 0) {
+      toast.error({
+        title: 'ভিডিও ফাইল নির্বাচন করুন',
+        description: 'ফাইল বেছে নিলেই সেটি সরাসরি Cloudinary-তে আপলোড হবে।',
+      });
       return;
     }
     if (mode === 'link' && !linkPreview) {
-      setMessage({ kind: 'err', text: 'সঠিক ইউটিউব বা ভিমিও লিঙ্ক দিন।' });
+      toast.error({ title: 'সঠিক ইউটিউব বা ভিমিও লিঙ্ক দিন' });
       return;
     }
 
-    const formData = new FormData();
-    formData.append('title', title.trim());
-    formData.append('category', category.trim());
-    formData.append('description', description.trim());
-    formData.append('type', mode === 'device' ? 'upload' : 'embed');
+    const poster = mode === 'device' ? thumbnailAsset : linkThumbnailAsset;
+    const created = await run<VideoItem>({
+      url: '/api/videos',
+      body: {
+        type: mode === 'device' ? 'upload' : 'embed',
+        title: title.trim(),
+        category: category.trim(),
+        description: description.trim(),
+        ...(mode === 'device' ? { filePath: videoAsset } : { embedUrl: embedUrl.trim() }),
+        ...(poster ? { thumbnail: poster } : {}),
+      },
+      success: mode === 'device' ? 'ভিডিও Cloudinary-তে সংরক্ষিত হয়েছে' : 'ইউটিউব/ভিমিও ভিডিও যুক্ত হয়েছে',
+      failure: 'ভিডিও সংরক্ষণ করা যায়নি',
+    });
+    if (!created) return;
 
-    // Field names must match `upload.fields([{ name: 'videoFile' }, { name: 'thumbnail' }, …])`
-    // on the server. The thumbnail is read at submit time from the input that is
-    // actually on screen for the current mode.
-    if (mode === 'device' && videoFile) {
-      formData.append('videoFile', videoFile, videoFile.name);
-      const thumbnailFile = thumbnailInput.getFile();
-      if (thumbnailFile) formData.append('thumbnail', thumbnailFile, thumbnailFile.name);
-    } else {
-      formData.append('embedUrl', embedUrl.trim());
-      const thumbnailFile = linkThumbnailInput.getFile();
-      if (thumbnailFile) formData.append('thumbnail', thumbnailFile, thumbnailFile.name);
-    }
-
-    // XHR (not fetch) so the admin sees a real upload progress bar for big files.
-    const xhr = new XMLHttpRequest();
-    xhrRef.current = xhr;
-    setSubmitting(true);
-    setProgress(0);
-
-    xhr.open('POST', '/api/videos');
-    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-
-    xhr.upload.onprogress = (evt) => {
-      if (evt.lengthComputable) setProgress(Math.round((evt.loaded / evt.total) * 100));
-    };
-
-    xhr.onload = () => {
-      setSubmitting(false);
-      xhrRef.current = null;
-      if (xhr.status >= 200 && xhr.status < 300) {
-        setMessage({
-          kind: 'ok',
-          text: mode === 'device' ? 'ভিডিও সফলভাবে আপলোড হয়েছে।' : 'ইউটিউব/ভিমিও ভিডিও যুক্ত হয়েছে।',
-        });
-        resetForm();
-        refetch();
-      } else {
-        let text = 'ভিডিও সংরক্ষণ করা যায়নি।';
-        try {
-          const body = JSON.parse(xhr.responseText) as { message?: string; error?: string };
-          text = body.message || body.error || text;
-        } catch {
-          /* keep default */
-        }
-        // 401/403 = dead session — clear it and let the shell redirect to login.
-        if (xhr.status === 401 || xhr.status === 403) handleAuthError(xhr.status, text);
-        setMessage({ kind: 'err', text });
-      }
-    };
-
-    xhr.onerror = () => {
-      setSubmitting(false);
-      xhrRef.current = null;
-      setMessage({ kind: 'err', text: 'নেটওয়ার্ক সমস্যা — আবার চেষ্টা করুন।' });
-    };
-
-    xhr.onabort = () => {
-      setSubmitting(false);
-      xhrRef.current = null;
-      setProgress(0);
-      setMessage({ kind: 'err', text: 'আপলোড বাতিল করা হয়েছে।' });
-    };
-
-    xhr.send(formData);
+    resetForm();
+    refetch();
   };
-
-  const cancelUpload = () => xhrRef.current?.abort();
 
   const handleDelete = async (id: string) => {
     if (!confirm('আপনি কি এই ভিডিওটি মুছে ফেলতে চান?')) return;
-    try {
-      const res = await fetch(`/api/videos/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-      if (res.status === 401 || res.status === 403) {
-        handleAuthError(res.status, 'আপনার সেশন শেষ হয়েছে অথবা এই কাজের অনুমতি নেই। আবার লগইন করুন।');
-        return;
-      }
-      refetch();
-    } catch (e) {
-      console.error(e);
-    }
+    const done = await run({
+      url: `/api/videos/${id}`,
+      method: 'DELETE',
+      success: 'ভিডিওটি মুছে ফেলা হয়েছে',
+      failure: 'ভিডিও মুছে ফেলা যায়নি',
+    });
+    if (done !== null) refetch();
   };
 
   const startEdit = (vid: VideoItem) => {
@@ -196,20 +119,16 @@ export const ManageVideos: React.FC = () => {
   };
 
   const saveEdit = async (id: string) => {
-    try {
-      const res = await fetch(`/api/videos/${id}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: editTitle, category: editCategory }),
-      });
-      if (res.status === 401 || res.status === 403) {
-        handleAuthError(res.status, 'আপনার সেশন শেষ হয়েছে অথবা এই কাজের অনুমতি নেই। আবার লগইন করুন।');
-        return;
-      }
+    const saved = await run<VideoItem>({
+      url: `/api/videos/${id}`,
+      method: 'PUT',
+      body: { title: editTitle, category: editCategory },
+      success: 'ভিডিওর তথ্য আপডেট হয়েছে',
+      failure: 'ভিডিও আপডেট করা যায়নি',
+    });
+    if (saved) {
       setEditingId(null);
       refetch();
-    } catch (e) {
-      console.error(e);
     }
   };
 
@@ -312,83 +231,21 @@ export const ManageVideos: React.FC = () => {
 
           {mode === 'device' ? (
             <div className="space-y-4">
-              {/* Drag & drop zone */}
-              <div
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragging(true);
-                }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragging(false);
-                  pickDroppedFile(e.dataTransfer.files);
-                }}
-                onClick={() => fileInputRef.current?.click()}
-                className={`cursor-pointer rounded-2xl border-2 border-dashed p-6 text-center transition-all ${
-                  dragging ? 'border-amber-500 bg-amber-50' : 'border-slate-300 bg-slate-50 hover:border-emerald-700'
-                }`}
-              >
-                <UploadCloud className="w-8 h-8 mx-auto text-emerald-800" />
-                <p className="text-xs font-bold text-slate-800 mt-2">
-                  ভিডিও ফাইল এখানে টেনে আনুন অথবা ক্লিক করে নির্বাচন করুন
-                </p>
-                <p className="text-[11px] text-slate-500 mt-1">MP4, WebM, MOV, MKV — সর্বোচ্চ ৫১২ এমবি</p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/*"
-                  className="hidden"
-                  onChange={(e) => pickDroppedFile(e.target.files)}
-                />
-              </div>
+              <AssetField
+                kind="video"
+                folder="videos"
+                label="ভিডিও ফাইল (MP4, WebM, MOV, MKV — সর্বোচ্চ ৫১২ MB)"
+                value={videoAsset}
+                onChange={setVideoAsset}
+              />
 
-              {videoFile && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="w-10 h-10 rounded-xl bg-emerald-950 text-amber-400 flex items-center justify-center shrink-0">
-                        <Film className="w-5 h-5" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-slate-900 truncate">{videoFile.name}</p>
-                        <p className="text-[11px] text-slate-500">{formatBytes(videoFile.size)}</p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setVideoFile(null);
-                        if (fileInputRef.current) fileInputRef.current.value = '';
-                      }}
-                      className="p-1.5 rounded-lg bg-slate-100 text-slate-500 hover:bg-red-100 hover:text-red-600"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {localPreviewUrl && (
-                    <video src={localPreviewUrl} controls className="w-full rounded-xl max-h-56 bg-black" />
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  থাম্বনেইল ইমেজ (ঐচ্ছিক — না দিলে স্বয়ংক্রিয়ভাবে তৈরি হবে)
-                </label>
-                <input
-                  ref={thumbnailInput.inputRef}
-                  type="file"
-                  name="thumbnail"
-                  accept="image/*"
-                  onChange={thumbnailInput.onChange}
-                  className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
-                />
-                {thumbnailInput.file && (
-                  <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {thumbnailInput.file.name}</p>
-                )}
-              </div>
+              <AssetField
+                kind="image"
+                folder="thumbnails"
+                label="থাম্বনেইল ইমেজ (ঐচ্ছিক — না দিলে Cloudinary নিজে থেকেই পোস্টার তৈরি করবে)"
+                value={thumbnailAsset}
+                onChange={setThumbnailAsset}
+              />
             </div>
           ) : (
             <div className="space-y-4">
@@ -439,20 +296,13 @@ export const ManageVideos: React.FC = () => {
               )}
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  কাস্টম থাম্বনেইল (ঐচ্ছিক — না দিলে ইউটিউব থাম্বনেইল ব্যবহার হবে)
-                </label>
-                <input
-                  ref={linkThumbnailInput.inputRef}
-                  type="file"
-                  name="thumbnail"
-                  accept="image/*"
-                  onChange={linkThumbnailInput.onChange}
-                  className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
+                <AssetField
+                  kind="image"
+                  folder="thumbnails"
+                  label="কাস্টম থাম্বনেইল (ঐচ্ছিক — না দিলে ইউটিউব থাম্বনেইল ব্যবহার হবে)"
+                  value={linkThumbnailAsset}
+                  onChange={setLinkThumbnailAsset}
                 />
-                {linkThumbnailInput.file && (
-                  <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {linkThumbnailInput.file.name}</p>
-                )}
               </div>
             </div>
           )}
@@ -467,33 +317,7 @@ export const ManageVideos: React.FC = () => {
             />
           </div>
 
-          {submitting && mode === 'device' && (
-            <div className="space-y-1.5">
-              <div className="h-2.5 w-full rounded-full bg-slate-200 overflow-hidden">
-                <div
-                  className="h-full bg-emerald-800 transition-all duration-200"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-600">
-                <span>আপলোড হচ্ছে… {progress}%</span>
-                <button type="button" onClick={cancelUpload} className="font-bold text-red-600 hover:underline">
-                  বাতিল করুন
-                </button>
-              </div>
-            </div>
-          )}
 
-          {message && (
-            <div
-              className={`flex items-center gap-2 text-xs font-bold px-4 py-2.5 rounded-xl ${
-                message.kind === 'ok' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'
-              }`}
-            >
-              {message.kind === 'ok' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-              {message.text}
-            </div>
-          )}
 
           <button
             type="submit"

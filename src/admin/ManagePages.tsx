@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useAuth } from '../context/AuthContext';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { AssetField } from '../components/admin/AssetField';
 import { PageContent, BilingualText } from '../types';
-import { LayoutTemplate, Save, CheckCircle2, Home as HomeIcon, Info } from 'lucide-react';
-import { readApiError } from '../utils/api';
+import { LayoutTemplate, Save, Home as HomeIcon, Info } from 'lucide-react';
+import type { AssetValue } from '../lib/upload';
 
 const inputCls =
   'w-full px-4 py-2.5 rounded-xl text-xs bg-slate-50 border border-slate-300 focus:outline-none focus:border-emerald-700';
@@ -143,12 +144,10 @@ const TextField: React.FC<{ label: string; value: string; onChange: (v: string) 
 );
 
 export const ManagePages: React.FC = () => {
-  const { token } = useAuth();
+  const { saving, run } = useSaveAction();
   const { data: pageContent } = useFetch<PageContent>('/api/page-content');
   const [activeSection, setActiveSection] = useState<'home' | 'about'>('home');
   const [draft, setDraft] = useState<PageContent | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
 
   useEffect(() => {
     if (pageContent && !draft) {
@@ -205,24 +204,14 @@ export const ManagePages: React.FC = () => {
 
   const handleSave = async () => {
     if (!draft) return;
-    setSaving(true);
-    setMsg('');
-    try {
-      const res = await fetch('/api/page-content', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(draft),
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'কন্টেন্ট সেভ করা যায়নি'));
-      setMsg('পেজ কন্টেন্ট সফলভাবে সেভ করা হয়েছে!');
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে: কন্টেন্ট সেভ করা যায়নি');
-    } finally {
-      setSaving(false);
-    }
+    const saved = await run<PageContent>({
+      url: '/api/page-content',
+      method: 'PUT',
+      body: draft,
+      success: 'পেজ কন্টেন্ট সফলভাবে সেভ হয়েছে',
+      failure: 'কন্টেন্ট সেভ করা যায়নি',
+    });
+    if (!saved) return;
   };
 
   if (!draft) {
@@ -268,11 +257,6 @@ export const ManagePages: React.FC = () => {
           সেভ করলেই সাইটে প্রয়োগ হবে।
         </p>
 
-        {msg && (
-          <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-900 font-bold text-xs flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" /> {msg}
-          </div>
-        )}
       </div>
 
       {/* ================= HOME SECTION ================= */}
@@ -311,7 +295,15 @@ export const ManagePages: React.FC = () => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <BilingualField label="'আমাদের সম্পর্কে' বাটনের টেক্সট" value={draft.home.learnMoreCta} onChange={(v) => setHome('learnMoreCta', v)} asInput />
-            <TextField label="টেজার ছবির URL" value={draft.home.teaserImage} onChange={(v) => setHome('teaserImage', v)} />
+            <AssetField
+              kind="image"
+              folder="hero"
+              compact
+              label="হোম পেজের টেজার ছবি"
+              hint="ছবি বেছে নিলেই Cloudinary-তে আপলোড হয়ে যাবে"
+              value={draft.home.teaserImage ? { url: draft.home.teaserImage } : null}
+              onChange={(asset: AssetValue | null) => setHome('teaserImage', asset?.url || '')}
+            />
           </div>
           <BilingualField label="ছবির নিচের ক্যাপশন" value={draft.home.teaserImageCaption} onChange={(v) => setHome('teaserImageCaption', v)} />
 

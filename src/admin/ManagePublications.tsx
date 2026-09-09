@@ -1,64 +1,58 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useFileInput } from '../hooks/useFileInput';
-import { useAuth } from '../context/AuthContext';
+import { AssetField } from '../components/admin/AssetField';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
+import { uploadQueueSize } from '../lib/upload';
+import type { AssetValue } from '../lib/upload';
 import { Publication } from '../types';
 import { BookOpen, Trash2, FileText, Edit3, X, Save } from 'lucide-react';
-import { readApiError } from '../utils/api';
 
 export const ManagePublications: React.FC = () => {
-  const { token } = useAuth();
+  const toast = useToast();
+  const { saving: submitting, run } = useSaveAction();
   const { data: publications, refetch } = useFetch<Publication[]>('/api/publications');
 
   const [title, setTitle] = useState('');
   const [type, setType] = useState<'annual_report' | 'newsletter' | 'report'>('annual_report');
   const [year, setYear] = useState(String(new Date().getFullYear()));
-  const pdfInput = useFileInput();
-  const [submitting, setSubmitting] = useState(false);
+  const [pdfAsset, setPdfAsset] = useState<AssetValue | null>(null);
+  const [coverAsset, setCoverAsset] = useState<AssetValue | null>(null);
 
   const [editing, setEditing] = useState<Publication | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editType, setEditType] = useState<Publication['type']>('annual_report');
   const [editYear, setEditYear] = useState('');
 
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Read the file at submit time (state, falling back to the input itself)
-    // so the FormData always carries the file the browser is showing.
-    const pdfFile = pdfInput.getFile();
-    if (!pdfFile) {
-      alert('অনুগ্রহ করে একটি পিডিএফ ফাইল নির্বাচন করুন অথবা PDF URL দিন');
+    if (!title.trim()) {
+      toast.error({ title: 'প্রকাশনার শিরোনাম লিখুন' });
+      return;
+    }
+    if (!pdfAsset?.url && uploadQueueSize() === 0) {
+      toast.error({
+        title: 'PDF ফাইল দিন',
+        description: 'ফাইলটি বেছে নিলেই সরাসরি Cloudinary-তে আপলোড হয়ে যাবে।',
+      });
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const formData = new FormData();
-      formData.append('title', title);
-      formData.append('type', type);
-      formData.append('year', year);
-      // Field name must match `upload.fields([{ name: 'pdfFile' }, …])` on the server.
-      formData.append('pdfFile', pdfFile, pdfFile.name);
+    const created = await run<Publication>({
+      url: '/api/publications',
+      body: { title: title.trim(), type, year: Number(year), pdfFile: pdfAsset, thumbnail: coverAsset },
+      success: 'প্রকাশনা যোগ হয়েছে',
+      failure: 'প্রকাশনা সংরক্ষণ করা যায়নি',
+    });
+    if (!created) return;
 
-      const res = await fetch('/api/publications', {
-        method: 'POST',
-        // No Content-Type here: the browser sets multipart/form-data with the boundary.
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error(await readApiError(res, 'পাবলিকেশন সেভ করা যায়নি'));
-
-      setTitle('');
-      // Clears the native input too, so the next publication cannot show a stale file.
-      pdfInput.reset();
-      refetch();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
-    } finally {
-      setSubmitting(false);
-    }
+    setTitle('');
+    setPdfAsset(null);
+    setCoverAsset(null);
+    refetch();
   };
+
 
   const startEdit = (pub: Publication) => {
     setEditing(pub);
@@ -67,38 +61,31 @@ export const ManagePublications: React.FC = () => {
     setEditYear(String(pub.year));
   };
 
+
   const handleSaveEdit = async () => {
     if (!editing) return;
-    try {
-      const formData = new FormData();
-      formData.append('title', editTitle);
-      formData.append('type', editType);
-      formData.append('year', editYear);
-      // PDF kept as-is; upload new file if needed
-      const res = await fetch(`/api/publications/${editing.id}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'পাবলিকেশন আপডেট করা যায়নি'));
-      setEditing(null);
-      refetch();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
-    }
+    const saved = await run<Publication>({
+      url: `/api/publications/${editing.id}`,
+      method: 'PUT',
+      body: { title: editTitle.trim(), type: editType, year: Number(editYear) },
+      success: 'প্রকাশনা আপডেট হয়েছে',
+      failure: 'প্রকাশনা আপডেট করা যায়নি',
+    });
+    if (!saved) return;
+    setEditing(null);
+    refetch();
   };
+
 
   const handleDelete = async (id: string) => {
     if (!confirm('আপনি কি এই প্রতিবেদনটি মুছে ফেলতে চান?')) return;
-    try {
-      await fetch(`/api/publications/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refetch();
-    } catch (e) {
-      console.error(e);
-    }
+    const done = await run({
+      url: `/api/publications/${id}`,
+      method: 'DELETE',
+      success: 'প্রকাশনা মুছে ফেলা হয়েছে',
+      failure: 'প্রকাশনা মুছে ফেলা যায়নি',
+    });
+    if (done !== null) refetch();
   };
 
   return (
@@ -148,19 +135,21 @@ export const ManagePublications: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">পিডিএফ ফাইল (PDF Document Upload)</label>
-              <input
-                ref={pdfInput.inputRef}
-                type="file"
-                name="pdfFile"
-                required
-                accept=".pdf,application/pdf"
-                onChange={pdfInput.onChange}
-                className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
+              <AssetField
+                kind="document"
+                folder="publications"
+                label="পিডিএফ ফাইল"
+                value={pdfAsset}
+                onChange={setPdfAsset}
               />
-              {pdfInput.file && (
-                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {pdfInput.file.name}</p>
-              )}
+
+<AssetField
+  kind="image"
+  folder="publications"
+  label="প্রচ্ছদ/থাম্বনেইল ছবি (ঐচ্ছিক)"
+  value={coverAsset}
+  onChange={setCoverAsset}
+/>
             </div>
 
           </div>

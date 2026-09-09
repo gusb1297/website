@@ -1,21 +1,21 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useAuth } from '../context/AuthContext';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
 import { StatItem } from '../types';
 import { BarChart3, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
-import { readApiError } from '../utils/api';
 
 const ICONS = ['Users', 'Coins', 'MapPin', 'School', 'HeartPulse', 'Award', 'Building', 'GraduationCap'];
 
 export const ManageStats: React.FC = () => {
-  const { token } = useAuth();
+  const toast = useToast();
+  const { saving, run } = useSaveAction();
   const { data: stats, refetch } = useFetch<StatItem[]>('/api/stats');
 
   const [label, setLabel] = useState('');
   const [value, setValue] = useState(1000);
   const [suffix, setSuffix] = useState('+');
   const [icon, setIcon] = useState('Users');
-  const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<StatItem | null>(null);
   const [editLabel, setEditLabel] = useState('');
   const [editValue, setEditValue] = useState(0);
@@ -24,25 +24,22 @@ export const ManageStats: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCreating(true);
-    try {
-      const res = await fetch('/api/stats', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ label, value: Number(value), suffix, icon }),
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'স্ট্যাট যোগ করা যায়নি'));
-      setLabel('');
-      setValue(1000);
-      refetch();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
-    } finally {
-      setCreating(false);
+    if (!label.trim()) {
+      toast.error({ title: 'স্ট্যাটের নাম লিখুন' });
+      return;
     }
+    const created = await run<StatItem>({
+      url: '/api/stats',
+      body: { label: label.trim(), value: Number(value), suffix: suffix.trim(), icon },
+      success: 'নতুন স্ট্যাট যোগ হয়েছে',
+      failure: 'স্ট্যাট যোগ করা যায়নি',
+    });
+    if (!created) return;
+    setLabel('');
+    setValue(1000);
+    setSuffix('+');
+    setIcon('Users');
+    refetch();
   };
 
   const startEdit = (stat: StatItem) => {
@@ -55,39 +52,31 @@ export const ManageStats: React.FC = () => {
 
   const handleSaveEdit = async () => {
     if (!editing) return;
-    try {
-      const res = await fetch(`/api/stats/${editing.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          label: editLabel,
-          value: Number(editValue),
-          suffix: editSuffix,
-          icon: editIcon,
-        }),
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'স্ট্যাট আপডেট করা যায়নি'));
-      setEditing(null);
-      refetch();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
+    if (!editLabel.trim()) {
+      toast.error({ title: 'স্ট্যাটের নাম লিখুন' });
+      return;
     }
+    const saved = await run<StatItem>({
+      url: `/api/stats/${editing.id}`,
+      method: 'PUT',
+      body: { label: editLabel.trim(), value: Number(editValue), suffix: editSuffix.trim(), icon: editIcon },
+      success: 'স্ট্যাট আপডেট হয়েছে',
+      failure: 'স্ট্যাট আপডেট করা যায়নি',
+    });
+    if (!saved) return;
+    setEditing(null);
+    refetch();
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('আপনি কি এই পরিসংখ্যানটি মুছে ফেলতে চান?')) return;
-    try {
-      await fetch(`/api/stats/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refetch();
-    } catch (e) {
-      console.error(e);
-    }
+    const done = await run({
+      url: `/api/stats/${id}`,
+      method: 'DELETE',
+      success: 'স্ট্যাটটি মুছে ফেলা হয়েছে',
+      failure: 'স্ট্যাটটি মুছে ফেলা যায়নি',
+    });
+    if (done !== null) refetch();
   };
 
   return (
@@ -148,10 +137,10 @@ export const ManageStats: React.FC = () => {
           <div className="sm:col-span-2 lg:col-span-5">
             <button
               type="submit"
-              disabled={creating}
+              disabled={saving}
               className="px-6 py-2.5 rounded-xl bg-emerald-950 hover:bg-emerald-900 text-amber-400 font-bold text-xs uppercase shadow transition-all"
             >
-              {creating ? 'সেভ হচ্ছে...' : 'কাউন্টার যোগ করুন'}
+              {saving ? 'সেভ হচ্ছে…' : 'কাউন্টার যোগ করুন'}
             </button>
           </div>
         </form>

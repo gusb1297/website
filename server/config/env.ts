@@ -29,27 +29,6 @@ export function isEphemeralHost(): boolean {
   );
 }
 
-function envFlag(name: string): boolean | undefined {
-  const raw = (process.env[name] || '').trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
-  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
-  return undefined;
-}
-
-/**
- * Whether uploads MUST go to Cloudinary (never to the local disk).
- *
- * Defaults to true in production and on known ephemeral hosts, because a file
- * written to the local disk there silently disappears on the next deploy.
- * Override with REQUIRE_CLOUD_STORAGE=true|false (e.g. `false` for a VPS that
- * has a real persistent disk).
- */
-export function isCloudStorageRequired(): boolean {
-  const flag = envFlag('REQUIRE_CLOUD_STORAGE');
-  if (flag !== undefined) return flag;
-  return isProduction() || isEphemeralHost();
-}
-
 export function getJwtSecret(): string {
   if (cachedJwtSecret) return cachedJwtSecret;
 

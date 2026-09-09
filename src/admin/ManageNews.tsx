@@ -1,72 +1,69 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
-import { useFileInput } from '../hooks/useFileInput';
-import { useAuth } from '../context/AuthContext';
+import { AssetField } from '../components/admin/AssetField';
+import { useSaveAction } from '../hooks/useSaveAction';
+import { useToast } from '../context/ToastContext';
+import { uploadQueueSize } from '../lib/upload';
+import type { AssetValue } from '../lib/upload';
 import { NewsItem } from '../types';
 import { Newspaper, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
-import { readApiError } from '../utils/api';
 
 const CATEGORIES = ['News', 'Event', 'Press Release', 'Impact Story'];
 
 export const ManageNews: React.FC = () => {
-  const { token } = useAuth();
+  const toast = useToast();
+  const { saving: submitting, run } = useSaveAction();
   const { data: newsList, refetch } = useFetch<NewsItem[]>('/api/news');
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [category, setCategory] = useState('News');
   const [author, setAuthor] = useState('');
-  const thumbnailInput = useFileInput();
-  const [submitting, setSubmitting] = useState(false);
+  const [thumbnailAsset, setThumbnailAsset] = useState<AssetValue | null>(null);
 
   const [editing, setEditing] = useState<NewsItem | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
   const [editCategory, setEditCategory] = useState('News');
   const [editAuthor, setEditAuthor] = useState('');
-  const editThumbnailInput = useFileInput();
+  const [editThumbnail, setEditThumbnail] = useState<AssetValue | null>(null);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Read the file at submit time (state, falling back to the input itself)
-    // so the FormData always carries the file the browser is showing.
-    const thumbnailFile = thumbnailInput.getFile();
-    if (!thumbnailFile) {
-      alert('সংবাদের থাম্বনেইল ছবি নির্বাচন করুন।');
+    if (!title.trim() || !content.trim()) {
+      toast.error({ title: 'শিরোনাম ও মূল লেখা লিখুন' });
       return;
     }
-    setSubmitting(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('title', title);
-      formData.append('content', content);
-      formData.append('category', category);
-      formData.append('author', author);
-
-      // Field name must match `upload.single('thumbnail')` on the server.
-      formData.append('thumbnail', thumbnailFile, thumbnailFile.name);
-
-      const res = await fetch('/api/news', {
-        method: 'POST',
-        // No Content-Type here: the browser sets multipart/form-data with the boundary.
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+    if (!thumbnailAsset?.url && uploadQueueSize() === 0) {
+      toast.error({
+        title: 'থাম্বনেইল ছবি নির্বাচন করুন',
+        description: 'ছবি বেছে নিলেই সেটি সরাসরি Cloudinary-তে আপলোড হয়ে যাবে।',
       });
-
-      if (!res.ok) throw new Error(await readApiError(res, 'সংবাদ সেভ করা যায়নি'));
-
-      setTitle('');
-      setContent('');
-      // Clears the native input too, so the next article cannot show a stale file.
-      thumbnailInput.reset();
-      refetch();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
-    } finally {
-      setSubmitting(false);
+      return;
     }
+
+    const created = await run<NewsItem>({
+      url: '/api/news',
+      body: {
+        title: title.trim(),
+        content: content.trim(),
+        category,
+        author: author.trim(),
+        thumbnail: thumbnailAsset,
+      },
+      success: 'সংবাদটি প্রকাশিত হয়েছে',
+      failure: 'সংবাদ সংরক্ষণ করা যায়নি',
+    });
+    if (!created) return;
+
+    setTitle('');
+    setContent('');
+    setAuthor('');
+    setThumbnailAsset(null);
+    refetch();
   };
+
 
   const startEdit = (news: NewsItem) => {
     setEditing(news);
@@ -74,46 +71,41 @@ export const ManageNews: React.FC = () => {
     setEditContent(news.content);
     setEditCategory(news.category);
     setEditAuthor(news.author || '');
-    editThumbnailInput.reset();
+    setEditThumbnail(news.thumbnail ? { url: news.thumbnail, publicId: news.thumbnailPublicId } : null);
   };
+
 
   const handleSaveEdit = async () => {
     if (!editing) return;
-    try {
-      const formData = new FormData();
-      formData.append('title', editTitle);
-      formData.append('content', editContent);
-      formData.append('category', editCategory);
-      formData.append('author', editAuthor);
-      const editThumbnailFile = editThumbnailInput.getFile();
-      if (editThumbnailFile) {
-        formData.append('thumbnail', editThumbnailFile, editThumbnailFile.name);
-      }
-      const res = await fetch(`/api/news/${editing.id}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!res.ok) throw new Error(await readApiError(res, 'সংবাদ আপডেট করা যায়নি'));
-      setEditing(null);
-      editThumbnailInput.reset();
-      refetch();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
-    }
+    const saved = await run<NewsItem>({
+      url: `/api/news/${editing.id}`,
+      method: 'PUT',
+      body: {
+        title: editTitle.trim(),
+        content: editContent.trim(),
+        category: editCategory,
+        author: editAuthor.trim(),
+        thumbnail: editThumbnail,
+      },
+      success: 'সংবাদ আপডেট হয়েছে',
+      failure: 'সংবাদ আপডেট করা যায়নি',
+    });
+    if (!saved) return;
+    setEditing(null);
+    setEditThumbnail(null);
+    refetch();
   };
+
 
   const handleDelete = async (id: string) => {
     if (!confirm('আপনি কি এই সংবাদটি ডিলিট করতে চান?')) return;
-    try {
-      await fetch(`/api/news/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refetch();
-    } catch (e) {
-      console.error(e);
-    }
+    const done = await run({
+      url: `/api/news/${id}`,
+      method: 'DELETE',
+      success: 'সংবাদটি মুছে ফেলা হয়েছে',
+      failure: 'সংবাদটি মুছে ফেলা যায়নি',
+    });
+    if (done !== null) refetch();
   };
 
   return (
@@ -174,19 +166,13 @@ export const ManageNews: React.FC = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">ছবি আপলোড (Direct Upload)</label>
-              <input
-                ref={thumbnailInput.inputRef}
-                type="file"
-                name="thumbnail"
-                required
-                accept="image/*"
-                onChange={thumbnailInput.onChange}
-                className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
+              <AssetField
+                kind="image"
+                folder="news"
+                label="থাম্বনেইল ছবি"
+                value={thumbnailAsset}
+                onChange={setThumbnailAsset}
               />
-              {thumbnailInput.file && (
-                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {thumbnailInput.file.name}</p>
-              )}
             </div>
 
 
@@ -231,8 +217,14 @@ export const ManageNews: React.FC = () => {
                   </select>
                   <input type="text" value={editAuthor} onChange={(e) => setEditAuthor(e.target.value)} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="লেখক" />
                   <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={4} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="মূল লেখা" />
-                  <input ref={editThumbnailInput.inputRef} type="file" name="thumbnail" accept="image/*" onChange={editThumbnailInput.onChange} className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" />
-                  <div className="col-span-2 flex gap-2">
+                  <AssetField
+                    kind="image"
+                    folder="news"
+                    compact
+                    value={editThumbnail}
+                    onChange={setEditThumbnail}
+                  />
+<div className="col-span-2 flex gap-2">
                     <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">
                       <Save className="w-3.5 h-3.5" /> আপডেট সেভ করুন
                     </button>
