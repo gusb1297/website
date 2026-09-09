@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
+import { useFileInput } from '../hooks/useFileInput';
 import { useAuth } from '../context/AuthContext';
 import { NewsItem } from '../types';
 import { Newspaper, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
@@ -15,7 +16,7 @@ export const ManageNews: React.FC = () => {
   const [content, setContent] = useState('');
   const [category, setCategory] = useState('News');
   const [author, setAuthor] = useState('');
-  const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
+  const thumbnailInput = useFileInput();
   const [submitting, setSubmitting] = useState(false);
 
   const [editing, setEditing] = useState<NewsItem | null>(null);
@@ -23,10 +24,13 @@ export const ManageNews: React.FC = () => {
   const [editContent, setEditContent] = useState('');
   const [editCategory, setEditCategory] = useState('News');
   const [editAuthor, setEditAuthor] = useState('');
-  const [editThumbnailFile, setEditThumbnailFile] = useState<File | null>(null);
+  const editThumbnailInput = useFileInput();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Read the file at submit time (state, falling back to the input itself)
+    // so the FormData always carries the file the browser is showing.
+    const thumbnailFile = thumbnailInput.getFile();
     if (!thumbnailFile) {
       alert('সংবাদের থাম্বনেইল ছবি নির্বাচন করুন।');
       return;
@@ -40,10 +44,12 @@ export const ManageNews: React.FC = () => {
       formData.append('category', category);
       formData.append('author', author);
 
-      formData.append('thumbnail', thumbnailFile);
+      // Field name must match `upload.single('thumbnail')` on the server.
+      formData.append('thumbnail', thumbnailFile, thumbnailFile.name);
 
       const res = await fetch('/api/news', {
         method: 'POST',
+        // No Content-Type here: the browser sets multipart/form-data with the boundary.
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
@@ -52,7 +58,8 @@ export const ManageNews: React.FC = () => {
 
       setTitle('');
       setContent('');
-      setThumbnailFile(null);
+      // Clears the native input too, so the next article cannot show a stale file.
+      thumbnailInput.reset();
       refetch();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'ত্রুটি ঘটেছে');
@@ -67,7 +74,7 @@ export const ManageNews: React.FC = () => {
     setEditContent(news.content);
     setEditCategory(news.category);
     setEditAuthor(news.author || '');
-    setEditThumbnailFile(null);
+    editThumbnailInput.reset();
   };
 
   const handleSaveEdit = async () => {
@@ -78,8 +85,9 @@ export const ManageNews: React.FC = () => {
       formData.append('content', editContent);
       formData.append('category', editCategory);
       formData.append('author', editAuthor);
+      const editThumbnailFile = editThumbnailInput.getFile();
       if (editThumbnailFile) {
-        formData.append('thumbnail', editThumbnailFile);
+        formData.append('thumbnail', editThumbnailFile, editThumbnailFile.name);
       }
       const res = await fetch(`/api/news/${editing.id}`, {
         method: 'PUT',
@@ -88,6 +96,7 @@ export const ManageNews: React.FC = () => {
       });
       if (!res.ok) throw new Error(await readApiError(res, 'সংবাদ আপডেট করা যায়নি'));
       setEditing(null);
+      editThumbnailInput.reset();
       refetch();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
@@ -167,12 +176,17 @@ export const ManageNews: React.FC = () => {
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">ছবি আপলোড (Direct Upload)</label>
               <input
+                ref={thumbnailInput.inputRef}
                 type="file"
+                name="thumbnail"
                 required
                 accept="image/*"
-                onChange={(e) => setThumbnailFile(e.target.files?.[0] || null)}
+                onChange={thumbnailInput.onChange}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
+              {thumbnailInput.file && (
+                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {thumbnailInput.file.name}</p>
+              )}
             </div>
 
 
@@ -217,7 +231,7 @@ export const ManageNews: React.FC = () => {
                   </select>
                   <input type="text" value={editAuthor} onChange={(e) => setEditAuthor(e.target.value)} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="লেখক" />
                   <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={4} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="মূল লেখা" />
-                  <input type="file" accept="image/*" onChange={(e) => setEditThumbnailFile(e.target.files?.[0] || null)} className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" />
+                  <input ref={editThumbnailInput.inputRef} type="file" name="thumbnail" accept="image/*" onChange={editThumbnailInput.onChange} className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg" />
                   <div className="col-span-2 flex gap-2">
                     <button onClick={handleSaveEdit} className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-emerald-950 text-amber-400 text-xs font-bold">
                       <Save className="w-3.5 h-3.5" /> আপডেট সেভ করুন

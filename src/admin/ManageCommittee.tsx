@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
+import { useFileInput } from '../hooks/useFileInput';
 import { useAuth } from '../context/AuthContext';
 import { CommitteeMember } from '../types';
 import { Users, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
@@ -22,7 +23,7 @@ export const ManageCommittee: React.FC = () => {
   const [bio, setBio] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const photoInput = useFileInput();
   const [creating, setCreating] = useState(false);
 
   const [editing, setEditing] = useState<CommitteeMember | null>(null);
@@ -32,10 +33,13 @@ export const ManageCommittee: React.FC = () => {
   const [editBio, setEditBio] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
-  const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
+  const editPhotoInput = useFileInput();
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Read the file at submit time (state, falling back to the input itself)
+    // so the FormData always carries the file the browser is showing.
+    const photoFile = photoInput.getFile();
     if (!photoFile) {
       alert('সদস্যের ছবি নির্বাচন করুন।');
       return;
@@ -49,9 +53,11 @@ export const ManageCommittee: React.FC = () => {
       formData.append('bio', bio);
       formData.append('email', email);
       formData.append('phone', phone);
-      formData.append('photo', photoFile);
+      // Field name must match `upload.single('photo')` on the server.
+      formData.append('photo', photoFile, photoFile.name);
       const res = await fetch('/api/committee', {
         method: 'POST',
+        // No Content-Type here: the browser sets multipart/form-data with the boundary.
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
@@ -61,7 +67,8 @@ export const ManageCommittee: React.FC = () => {
       setBio('');
       setEmail('');
       setPhone('');
-      setPhotoFile(null);
+      // Clears the native input too, so the next member cannot show a stale file.
+      photoInput.reset();
       refetch();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
@@ -78,7 +85,7 @@ export const ManageCommittee: React.FC = () => {
     setEditBio(member.bio || '');
     setEditEmail(member.email || '');
     setEditPhone(member.phone || '');
-    setEditPhotoFile(null);
+    editPhotoInput.reset();
   };
 
   const handleSaveEdit = async () => {
@@ -91,8 +98,9 @@ export const ManageCommittee: React.FC = () => {
       formData.append('bio', editBio);
       formData.append('email', editEmail);
       formData.append('phone', editPhone);
+      const editPhotoFile = editPhotoInput.getFile();
       if (editPhotoFile) {
-        formData.append('photo', editPhotoFile);
+        formData.append('photo', editPhotoFile, editPhotoFile.name);
       }
       const res = await fetch(`/api/committee/${editing.id}`, {
         method: 'PUT',
@@ -101,6 +109,7 @@ export const ManageCommittee: React.FC = () => {
       });
       if (!res.ok) throw new Error(await readApiError(res, 'সদস্য আপডেট করা যায়নি'));
       setEditing(null);
+      editPhotoInput.reset();
       refetch();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
@@ -178,12 +187,17 @@ export const ManageCommittee: React.FC = () => {
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">ছবি আপলোড (Direct Upload)</label>
               <input
+                ref={photoInput.inputRef}
                 type="file"
+                name="photo"
                 required
                 accept="image/*"
-                onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                onChange={photoInput.onChange}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
+              {photoInput.file && (
+                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {photoInput.file.name}</p>
+              )}
             </div>
 
           </div>
@@ -236,9 +250,11 @@ export const ManageCommittee: React.FC = () => {
                   <textarea value={editBio} onChange={(e) => setEditBio(e.target.value)} rows={2} className="col-span-2 px-3 py-2 rounded-lg text-xs border border-slate-300" placeholder="জীবনী" />
                   <p className="col-span-2 text-xs text-slate-400">ছবি পরিবর্তনের জন্য নতুন ফাইল আপলোড করুন (ঐচ্ছিক)</p>
                   <input
+                    ref={editPhotoInput.inputRef}
                     type="file"
+                    name="photo"
                     accept="image/*"
-                    onChange={(e) => setEditPhotoFile(e.target.files?.[0] || null)}
+                    onChange={editPhotoInput.onChange}
                     className="col-span-2 px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg"
                   />
                   <div className="col-span-2 flex gap-2">

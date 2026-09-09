@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
+import { useFileInput } from '../hooks/useFileInput';
 import { useAuth } from '../context/AuthContext';
 import { Partner } from '../types';
 import { Handshake, Plus, Trash2, Edit3, X, Save } from 'lucide-react';
@@ -11,15 +12,18 @@ export const ManagePartners: React.FC = () => {
 
   const [name, setName] = useState('');
   const [websiteUrl, setWebsiteUrl] = useState('');
-  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const logoInput = useFileInput();
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Partner | null>(null);
   const [editName, setEditName] = useState('');
   const [editUrl, setEditUrl] = useState('');
-  const [editLogoFile, setEditLogoFile] = useState<File | null>(null);
+  const editLogoInput = useFileInput();
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Read the file at submit time (state, falling back to the input itself)
+    // so the FormData always carries the file the browser is showing.
+    const logoFile = logoInput.getFile();
     if (!logoFile) {
       alert('পার্টনারের লোগো নির্বাচন করুন।');
       return;
@@ -29,16 +33,19 @@ export const ManagePartners: React.FC = () => {
       const formData = new FormData();
       formData.append('name', name);
       formData.append('websiteUrl', websiteUrl);
-      formData.append('logo', logoFile);
+      // Field name must match `upload.single('logo')` on the server.
+      formData.append('logo', logoFile, logoFile.name);
       const res = await fetch('/api/partners', {
         method: 'POST',
+        // No Content-Type here: the browser sets multipart/form-data with the boundary.
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
       if (!res.ok) throw new Error(await readApiError(res, 'পার্টনার যোগ করা যায়নি'));
       setName('');
       setWebsiteUrl('');
-      setLogoFile(null);
+      // Clears the native input too, so the next partner cannot show a stale file.
+      logoInput.reset();
       refetch();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
@@ -51,7 +58,7 @@ export const ManagePartners: React.FC = () => {
     setEditing(partner);
     setEditName(partner.name);
     setEditUrl(partner.websiteUrl || '');
-    setEditLogoFile(null);
+    editLogoInput.reset();
   };
 
   const handleSaveEdit = async () => {
@@ -60,8 +67,9 @@ export const ManagePartners: React.FC = () => {
       const formData = new FormData();
       formData.append('name', editName);
       formData.append('websiteUrl', editUrl);
+      const editLogoFile = editLogoInput.getFile();
       if (editLogoFile) {
-        formData.append('logo', editLogoFile);
+        formData.append('logo', editLogoFile, editLogoFile.name);
       }
       const res = await fetch(`/api/partners/${editing.id}`, {
         method: 'PUT',
@@ -70,6 +78,7 @@ export const ManagePartners: React.FC = () => {
       });
       if (!res.ok) throw new Error(await readApiError(res, 'পার্টনার আপডেট করা যায়নি'));
       setEditing(null);
+      editLogoInput.reset();
       refetch();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
@@ -125,12 +134,17 @@ export const ManagePartners: React.FC = () => {
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">লোগো আপলোড (Direct Upload)</label>
               <input
+                ref={logoInput.inputRef}
                 type="file"
+                name="logo"
                 required
                 accept="image/*"
-                onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+                onChange={logoInput.onChange}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
+              {logoInput.file && (
+                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {logoInput.file.name}</p>
+              )}
             </div>
 
           </div>
@@ -182,9 +196,11 @@ export const ManagePartners: React.FC = () => {
                     placeholder="ওয়েবসাইট URL"
                   />
                   <input
+                    ref={editLogoInput.inputRef}
                     type="file"
+                    name="logo"
                     accept="image/*"
-                    onChange={(e) => setEditLogoFile(e.target.files?.[0] || null)}
+                    onChange={editLogoInput.onChange}
                     className="w-full px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg"
                     title="নতুন লোগো আপলোড করুন (ঐচ্ছিক)"
                   />

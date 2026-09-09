@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
+import { useFileInput } from '../hooks/useFileInput';
 import { useAuth } from '../context/AuthContext';
 import { VideoItem } from '../types';
 import { formatBytes, previewVideoLink, videoSourceLabel } from '../utils/video';
@@ -34,7 +35,11 @@ export const ManageVideos: React.FC = () => {
 
   // Device upload state
   const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
+  // Optional poster image. The device and link panels each render their own
+  // <input type="file">, so each gets its own controller; only the input of the
+  // active mode is mounted, and the submit handler reads from that one.
+  const thumbnailInput = useFileInput();
+  const linkThumbnailInput = useFileInput();
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,7 +64,10 @@ export const ManageVideos: React.FC = () => {
     setDescription('');
     setEmbedUrl('');
     setVideoFile(null);
-    setThumbnailFile(null);
+    // Clears the native inputs as well as the state, so the same files can be
+    // re-selected and no stale file name is displayed after a successful upload.
+    thumbnailInput.reset();
+    linkThumbnailInput.reset();
     setProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -99,12 +107,17 @@ export const ManageVideos: React.FC = () => {
     formData.append('description', description.trim());
     formData.append('type', mode === 'device' ? 'upload' : 'embed');
 
+    // Field names must match `upload.fields([{ name: 'videoFile' }, { name: 'thumbnail' }, …])`
+    // on the server. The thumbnail is read at submit time from the input that is
+    // actually on screen for the current mode.
     if (mode === 'device' && videoFile) {
-      formData.append('videoFile', videoFile);
-      if (thumbnailFile) formData.append('thumbnail', thumbnailFile);
+      formData.append('videoFile', videoFile, videoFile.name);
+      const thumbnailFile = thumbnailInput.getFile();
+      if (thumbnailFile) formData.append('thumbnail', thumbnailFile, thumbnailFile.name);
     } else {
       formData.append('embedUrl', embedUrl.trim());
-      if (thumbnailFile) formData.append('thumbnail', thumbnailFile);
+      const thumbnailFile = linkThumbnailInput.getFile();
+      if (thumbnailFile) formData.append('thumbnail', thumbnailFile, thumbnailFile.name);
     }
 
     // XHR (not fetch) so the admin sees a real upload progress bar for big files.
@@ -365,11 +378,16 @@ export const ManageVideos: React.FC = () => {
                   থাম্বনেইল ইমেজ (ঐচ্ছিক — না দিলে স্বয়ংক্রিয়ভাবে তৈরি হবে)
                 </label>
                 <input
+                  ref={thumbnailInput.inputRef}
                   type="file"
+                  name="thumbnail"
                   accept="image/*"
-                  onChange={(e) => setThumbnailFile(e.target.files?.[0] || null)}
+                  onChange={thumbnailInput.onChange}
                   className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
                 />
+                {thumbnailInput.file && (
+                  <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {thumbnailInput.file.name}</p>
+                )}
               </div>
             </div>
           ) : (
@@ -425,11 +443,16 @@ export const ManageVideos: React.FC = () => {
                   কাস্টম থাম্বনেইল (ঐচ্ছিক — না দিলে ইউটিউব থাম্বনেইল ব্যবহার হবে)
                 </label>
                 <input
+                  ref={linkThumbnailInput.inputRef}
                   type="file"
+                  name="thumbnail"
                   accept="image/*"
-                  onChange={(e) => setThumbnailFile(e.target.files?.[0] || null)}
+                  onChange={linkThumbnailInput.onChange}
                   className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
                 />
+                {linkThumbnailInput.file && (
+                  <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {linkThumbnailInput.file.name}</p>
+                )}
               </div>
             </div>
           )}

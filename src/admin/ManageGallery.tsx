@@ -550,6 +550,7 @@ export const ManageGallery: React.FC = () => {
   const [editAlbumTitle, setEditAlbumTitle] = useState('');
   const [editAlbumDescription, setEditAlbumDescription] = useState('');
   const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
+  const editCoverInputRef = useRef<HTMLInputElement>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [albumNotice, setAlbumNotice] = useState<Notice | null>(null);
   const [deletingAlbumId, setDeletingAlbumId] = useState<string | null>(null);
@@ -624,11 +625,17 @@ export const ManageGallery: React.FC = () => {
     }
   };
 
+  /** Clear the cover selection in React state AND in the native file input. */
+  const clearEditCover = () => {
+    setEditCoverFile(null);
+    if (editCoverInputRef.current) editCoverInputRef.current.value = '';
+  };
+
   const startEditAlbum = (album: GalleryAlbum) => {
     setEditingAlbum(album);
     setEditAlbumTitle(album.title);
     setEditAlbumDescription(album.description || '');
-    setEditCoverFile(null);
+    clearEditCover();
     setAlbumNotice(null);
   };
 
@@ -640,7 +647,9 @@ export const ManageGallery: React.FC = () => {
     const error = validateImage(file);
     if (error) {
       setAlbumNotice({ kind: 'error', text: error });
-      setEditCoverFile(null);
+      // Rejected file: also empty the input so it does not keep displaying a
+      // file name that will never be uploaded.
+      clearEditCover();
       return;
     }
     setAlbumNotice(null);
@@ -664,7 +673,18 @@ export const ManageGallery: React.FC = () => {
     const formData = new FormData();
     formData.append('title', title);
     formData.append('description', description);
-    if (editCoverFile) formData.append('coverImage', editCoverFile);
+    // Prefer the validated state; fall back to the input's own FileList so a
+    // file that is visibly selected is never silently dropped from the request.
+    const coverFile = editCoverFile || editCoverInputRef.current?.files?.[0] || null;
+    if (coverFile) {
+      const coverError = validateImage(coverFile);
+      if (coverError) {
+        setAlbumNotice({ kind: 'error', text: coverError });
+        return;
+      }
+      // Field name must match `galleryUpload.single('coverImage')` on the server.
+      formData.append('coverImage', coverFile, coverFile.name);
+    }
     setSavingEdit(true);
     try {
       const updated = await uploadFormData<GalleryAlbum>(
@@ -676,7 +696,7 @@ export const ManageGallery: React.FC = () => {
       );
       setAlbums((current) => (current || []).map((album) => (album.id === updated.id ? updated : album)));
       setEditingAlbum(null);
-      setEditCoverFile(null);
+      clearEditCover();
       setAlbumNotice({ kind: 'success', text: 'অ্যালবামের তথ্য আপডেট হয়েছে।' });
     } catch (editError) {
       const status = editError instanceof ApiRequestError ? editError.status : 0;
@@ -892,7 +912,9 @@ export const ManageGallery: React.FC = () => {
                     <div>
                       <label className="mb-1 block text-[11px] font-bold text-slate-600">নতুন কভার ছবি (ঐচ্ছিক)</label>
                       <input
+                        ref={editCoverInputRef}
                         type="file"
+                        name="coverImage"
                         accept={IMAGE_ACCEPT}
                         onChange={(event) => handleEditCover(event.target.files?.[0])}
                         className="block w-full min-w-0 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2 text-xs text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-100 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-emerald-900"
@@ -912,7 +934,7 @@ export const ManageGallery: React.FC = () => {
                         type="button"
                         onClick={() => {
                           setEditingAlbum(null);
-                          setEditCoverFile(null);
+                          clearEditCover();
                         }}
                         className="rounded-lg bg-slate-200 px-3 py-2.5 text-slate-600 hover:bg-slate-300"
                         aria-label="সম্পাদনা বাতিল করুন"

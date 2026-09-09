@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useFetch } from '../hooks/useFetch';
+import { useFileInput } from '../hooks/useFileInput';
 import { useAuth } from '../context/AuthContext';
 import { HeroSlide } from '../types';
 import { Plus, Trash2, Eye, EyeOff, Edit3, X, Save } from 'lucide-react';
@@ -13,7 +14,7 @@ export const ManageHeroSlider: React.FC = () => {
   const [subtext, setSubtext] = useState('');
   const [buttonText, setButtonText] = useState('');
   const [buttonLink, setButtonLink] = useState('/programs');
-  const [imageFile, setImageFile] = useState<File | null>(null);
+  const imageInput = useFileInput();
   const [creating, setCreating] = useState(false);
 
   const [editing, setEditing] = useState<HeroSlide | null>(null);
@@ -21,10 +22,13 @@ export const ManageHeroSlider: React.FC = () => {
   const [editSubtext, setEditSubtext] = useState('');
   const [editButtonText, setEditButtonText] = useState('');
   const [editButtonLink, setEditButtonLink] = useState('');
-  const [editImageFile, setEditImageFile] = useState<File | null>(null);
+  const editImageInput = useFileInput();
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Read the file at submit time (state, falling back to the input itself)
+    // so the FormData always carries the file the browser is showing.
+    const imageFile = imageInput.getFile();
     if (!imageFile) {
       alert('স্লাইডের জন্য একটি ছবি নির্বাচন করুন।');
       return;
@@ -39,10 +43,12 @@ export const ManageHeroSlider: React.FC = () => {
       formData.append('buttonLink', buttonLink);
       formData.append('isActive', 'true');
 
-      formData.append('image', imageFile);
+      // Field name must match `upload.single('image')` on the server.
+      formData.append('image', imageFile, imageFile.name);
 
       const res = await fetch('/api/hero-slides', {
         method: 'POST',
+        // No Content-Type here: the browser sets multipart/form-data with the boundary.
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -53,7 +59,8 @@ export const ManageHeroSlider: React.FC = () => {
 
       setHeadline('');
       setSubtext('');
-      setImageFile(null);
+      // Clears the native input too, so the next slide cannot show a stale file.
+      imageInput.reset();
       refetch();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'স্লাইড যোগ করতে সমস্যা হয়েছে');
@@ -84,7 +91,7 @@ export const ManageHeroSlider: React.FC = () => {
     setEditSubtext(slide.subtext);
     setEditButtonText(slide.buttonText || '');
     setEditButtonLink(slide.buttonLink || '');
-    setEditImageFile(null);
+    editImageInput.reset();
   };
 
   const handleSaveEdit = async () => {
@@ -96,8 +103,9 @@ export const ManageHeroSlider: React.FC = () => {
       formData.append('buttonText', editButtonText);
       formData.append('buttonLink', editButtonLink);
       formData.append('isActive', String(editing.isActive));
+      const editImageFile = editImageInput.getFile();
       if (editImageFile) {
-        formData.append('image', editImageFile);
+        formData.append('image', editImageFile, editImageFile.name);
       }
       const res = await fetch(`/api/hero-slides/${editing.id}`, {
         method: 'PUT',
@@ -106,6 +114,7 @@ export const ManageHeroSlider: React.FC = () => {
       });
       if (!res.ok) throw new Error(await readApiError(res, 'স্লাইড আপডেট করা যায়নি'));
       setEditing(null);
+      editImageInput.reset();
       refetch();
     } catch (e) {
       alert(e instanceof Error ? e.message : 'ত্রুটি ঘটেছে');
@@ -183,12 +192,17 @@ export const ManageHeroSlider: React.FC = () => {
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">ছবি ফাইল আপলোড করুন (Direct Upload)</label>
               <input
+                ref={imageInput.inputRef}
                 type="file"
+                name="image"
                 required
                 accept="image/*"
-                onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                onChange={imageInput.onChange}
                 className="w-full px-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-300"
               />
+              {imageInput.file && (
+                <p className="mt-1 truncate text-[10px] text-emerald-700">নির্বাচিত: {imageInput.file.name}</p>
+              )}
             </div>
           </div>
 
@@ -283,9 +297,11 @@ export const ManageHeroSlider: React.FC = () => {
                     placeholder="বাটন লিঙ্ক (যেমন: /programs)"
                   />
                   <input
+                    ref={editImageInput.inputRef}
                     type="file"
+                    name="image"
                     accept="image/*"
-                    onChange={(e) => setEditImageFile(e.target.files?.[0] || null)}
+                    onChange={editImageInput.onChange}
                     className="px-2 py-1 text-[10px] border border-dashed border-slate-300 rounded-lg"
                   />
                   <div className="md:col-span-2 flex gap-2">
