@@ -169,13 +169,17 @@ export function authHeaders(cfg: AmStorageConfig, body: Buffer, now = Date.now()
   return { 'X-AM-Storage-Key-Id': cfg.keyId, 'X-AM-Storage-Key-Secret': cfg.keySecret };
 }
 
-function extractMessage(payload: GatewayResponse | null, fallback: string): string {
+function extractMessage(payload: GatewayResponse | null, rawText: string, fallback: string): string {
   const raw = payload?.message ?? payload?.error;
   if (typeof raw === 'string' && raw.trim()) return raw.trim();
   if (raw && typeof raw === 'object' && typeof (raw as { message?: unknown }).message === 'string') {
     return String((raw as { message: string }).message);
   }
-  return fallback;
+  const clean = (rawText || '').trim();
+  if (clean.startsWith('<!DOCTYPE') || clean.startsWith('<html') || clean.includes('/_next/static/')) {
+    return 'গেটওয়ে সার্ভার থেকে API JSON-এর পরিবর্তে Next.js ওয়েবপেজ (HTML 404) ফেরত এসেছে — গেটওয়ে সার্ভারে /api/v1/storage/upload এন্ডপয়েন্ট পাওয়া যায়নি।';
+  }
+  return clean.slice(0, 200) || fallback;
 }
 
 function titleFrom(originalName: string | undefined, fallback: string): string {
@@ -242,7 +246,7 @@ export async function uploadDocumentToAmStorage(options: {
   }
 
   if (!response.ok) {
-    const reason = extractMessage(payload, text.slice(0, 200) || `HTTP ${response.status}`);
+    const reason = extractMessage(payload, text, `HTTP ${response.status}`);
     console.error(`[am-storage] gateway rejected the upload (HTTP ${response.status}):`, reason);
     throw new AmStorageError(`${UNAVAILABLE_MESSAGE}\n(HTTP ${response.status}: ${reason})`);
   }
