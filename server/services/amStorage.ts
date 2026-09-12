@@ -4,7 +4,10 @@
  * Cloudinary is kept for pictures and videos only. Every *document* an admin (or
  * a job applicant) uploads is pushed, server-side, to the AM Storage gateway:
  *
- *     POST {AM_STORAGE_BRIDGE_URL}/api/v1/storage/upload   (multipart: file, title)
+ *     POST {AM_STORAGE_BRIDGE_URL}/storage/upload   (multipart: file, title)
+ *
+ * The base URL (AM_STORAGE_BRIDGE_URL) includes the gateway's API prefix —
+ * e.g. https://st.thamjj13.top/api/v1 — so all paths below are relative to it.
  *
  * Two authentication modes are supported (see the gateway guide):
  *   - `dual`  (default) — key id + key secret travel as headers over TLS.
@@ -21,11 +24,11 @@
 import fs from 'fs';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 
-const DEFAULT_BRIDGE_URL = 'https://st.thamjj13.top';
-const DEFAULT_KEY_ID = 'am_store_live_j7OX7YW2HBHveff1';
-const DEFAULT_KEY_SECRET = 'am_sec_live__sJQeDB79gxeQMsu3GYIJSIiworDApHMDxfMZztkXPI';
+const DEFAULT_BRIDGE_URL = 'https://st.thamjj13.top/api/v1';
+const DEFAULT_KEY_ID = 'ng_key_poSEfjsP5RZVE71L';
+const DEFAULT_KEY_SECRET = 'ng_live_xLUXCYNcRKWb1MedNwLaaLaIxYArDutgNVgy47Ml5Js';
 
-const UPLOAD_PATH = '/api/v1/storage/upload';
+const UPLOAD_PATH = '/storage/upload';
 const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
 export type AmAuthMode = 'dual' | 'hmac';
@@ -280,7 +283,7 @@ export async function deleteDocumentFromAmStorage(fileId?: string): Promise<bool
   const cfg = amStorageConfig();
   try {
     const body = Buffer.alloc(0);
-    const response = await fetch(`${cfg.baseUrl}/api/v1/storage/files/${encodeURIComponent(id)}`, {
+    const response = await fetch(`${cfg.baseUrl}/storage/files/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       headers: { ...authHeaders(cfg, body), Accept: 'application/json' },
       signal: AbortSignal.timeout(30_000),

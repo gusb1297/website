@@ -25,9 +25,9 @@ The gateway server (e.g., `https://st.thamjj13.top`) MUST expose the following R
 ### 2.1. Base URL Configuration
 The website connects to the gateway using the environment variable:
 ```env
-AM_STORAGE_BRIDGE_URL=https://st.thamjj13.top
-AM_STORAGE_KEY_ID=am_store_live_xxxxxxxx
-AM_STORAGE_KEY_SECRET=am_sec_live_xxxxxxxx
+AM_STORAGE_BRIDGE_URL=https://st.thamjj13.top/api/v1
+AM_STORAGE_KEY_ID=ng_key_xxxxxxxx
+AM_STORAGE_KEY_SECRET=ng_live_xxxxxxxx
 AM_STORAGE_AUTH_MODE=dual    # Options: 'dual' (default) or 'hmac'
 ```
 
@@ -41,15 +41,15 @@ The gateway must support at least one of the two authentication mechanisms (pref
 Sent over HTTPS on every request:
 | Header | Value | Description |
 | :--- | :--- | :--- |
-| `X-AM-Storage-Key-Id` | `am_store_live_...` | Public Key ID issued for the application |
-| `X-AM-Storage-Key-Secret` | `am_sec_live_...` | Private Secret Key issued for the application |
+| `X-AM-Storage-Key-Id` | `ng_key_...` | Public Key ID issued for the application |
+| `X-AM-Storage-Key-Secret` | `ng_live_...` | Private Secret Key issued for the application |
 | `Accept` | `application/json` | Client expects JSON response |
 
 #### Mode B: `hmac` (Cryptographic Signature Mode)
 Sent over HTTPS on every request:
 | Header | Value | Description |
 | :--- | :--- | :--- |
-| `X-AM-Storage-Key-Id` | `am_store_live_...` | Public Key ID |
+| `X-AM-Storage-Key-Id` | `ng_key_...` | Public Key ID |
 | `X-AM-Storage-Timestamp` | `1725984000` | Unix epoch timestamp (seconds) |
 | `X-AM-Storage-Signature` | `hex(HMAC_SHA256(secret, "<timestamp>:<sha256(body)>"))` | SHA256 HMAC signature |
 | `Accept` | `application/json` | Client expects JSON response |
