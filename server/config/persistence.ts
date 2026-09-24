@@ -241,7 +241,7 @@ export function writeStoreFile(): void {
  * Never writes before the database copy has been read (`dbLoaded`), so a
  * half-empty in-memory store can never clobber real content in MongoDB.
  */
-export async function writeStoreToDatabase(): Promise<void> {
+export async function writeStoreToDatabase(options: { force?: boolean } = {}): Promise<void> {
   if (!isDatabaseReady()) return;
   if (!dbLoaded) {
     dirtySinceBoot = true;
@@ -253,7 +253,10 @@ export async function writeStoreToDatabase(): Promise<void> {
     return dbWriteInFlight;
   }
 
-  dbWriteInFlight = (async () => {
+  const write: Promise<void> = (async () => {
+    // `force` re-sends an unchanged store once — used to confirm MongoDB
+    // accepts writes again after an error (see healPersistence()).
+    let force = Boolean(options.force);
     try {
       do {
         dbWriteQueued = false;
@@ -261,7 +264,8 @@ export async function writeStoreToDatabase(): Promise<void> {
         // instances / undefined values) and the comparison stays cheap.
         const plain = JSON.parse(JSON.stringify(memoryStore)) as Record<string, unknown>;
         const serialized = JSON.stringify(plain);
-        if (serialized === dbSnapshot) continue;
+        if (serialized === dbSnapshot && !force) continue;
+        force = false;
 
         await MSiteContent.updateOne(
           { key: CONTENT_KEY },
@@ -276,12 +280,43 @@ export async function writeStoreToDatabase(): Promise<void> {
     } catch (err) {
       lastDbError = (err as Error).message;
       console.error('[persistence] Failed to save site content to MongoDB:', lastDbError);
-    } finally {
-      dbWriteInFlight = null;
     }
-  })();
+  })().finally(() => {
+    // Cleared in a chained `.finally` on purpose: it always runs after the
+    // assignment below. A `finally` inside the async body ran synchronously
+    // when there was nothing to write — i.e. BEFORE the assignment — which
+    // left a settled promise in dbWriteInFlight, so every later save returned
+    // early and never reached MongoDB while the status still said "durable".
+    if (dbWriteInFlight === write) dbWriteInFlight = null;
+    // A save requested after the loop above had already finished: run it now.
+    if (dbWriteQueued) {
+      dbWriteQueued = false;
+      void writeStoreToDatabase();
+    }
+  });
+  dbWriteInFlight = write;
+  return write;
+}
 
-  return dbWriteInFlight;
+const HEAL_MIN_INTERVAL_MS = 60_000;
+let lastHealAt = 0;
+
+/**
+ * Called by the status endpoints (/api/health, /api/storage/status).
+ *
+ * One failed MongoDB load/save used to keep the admin banner red until the next
+ * content edit happened to succeed — unchanged content is never re-sent, so
+ * nothing cleared the error. While MongoDB is connected, retry at most once a
+ * minute: finish the initial load, or re-send the store to prove writes work.
+ */
+export function healPersistence(): void {
+  if (!isDatabaseReady() || syncInFlight || dbWriteInFlight) return;
+  if (dbLoaded && !lastDbError) return;
+  const now = Date.now();
+  if (now - lastHealAt < HEAL_MIN_INTERVAL_MS) return;
+  lastHealAt = now;
+  if (!dbLoaded) void syncStoreWithDatabase();
+  else void writeStoreToDatabase({ force: true });
 }
 
 /** Flush pending changes on graceful shutdown (awaits the database write). */

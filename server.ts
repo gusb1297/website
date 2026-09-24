@@ -1,21 +1,20 @@
 // Load .env before anything else so config modules (Cloudinary, JWT, Mongo)
 // see the credentials on first use.
 import 'dotenv/config';
+// Cleans CLOUDINARY_URL before the Cloudinary SDK parses it (a quoted or
+// otherwise malformed value used to crash the server on load).
+import './server/config/cloudinaryEnv';
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import apiRouter from './server/routes/api';
-import {
-  loadStore,
-  flushStore,
-  syncStoreWithDatabase,
-  describePersistenceStatus,
-} from './server/config/persistence';
-import { connectMongo, describeMongoStatus, startMongoReconnectLoop } from './server/config/mongo';
+import { loadStore, flushStore, syncStoreWithDatabase } from './server/config/persistence';
+import { connectMongo, startMongoReconnectLoop } from './server/config/mongo';
 import { bootstrapAdminFromEnv } from './server/services/adminService';
 import { getJwtSecret, isEphemeralHost } from './server/config/env';
-import { StorageError, describeStorageStatus, verifyStorageConnection } from './server/services/storage';
+import { StorageError, verifyStorageConnection } from './server/services/storage';
+import { getHealth } from './server/controllers/storageController';
 import { AmStorageError } from './server/services/amStorage';
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -132,46 +131,15 @@ async function startServer() {
     await bootstrapAdminFromEnv();
   });
 
-  // File storage: Cloudinary is the only place media is kept. Verify the
-  // credentials at boot so a typo shows up here instead of at the first upload.
-  const cloudinaryOk = await verifyStorageConnection();
-  if (!cloudinaryOk) {
-    console.error(
-      '[storage] WARNING: Cloudinary is not configured (or unreachable). Every image/video/PDF upload will be ' +
-        'refused with a clear message until CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET ' +
-        '(or CLOUDINARY_URL) are set. Local ./uploads storage has been removed on purpose: files written to an ' +
-        'ephemeral host disappear on the next deploy.'
-    );
-  }
+  // File storage: Cloudinary is the only place media is kept. The connection
+  // is checked in the background (it never delays the start) and re-checked
+  // automatically after a failure; the result is logged and shown in the admin
+  // banner. Media is never written to the local disk.
+  void verifyStorageConnection();
 
   // Healthcheck endpoint (before the API router). Also reports whether
   // uploads and content edits are being stored durably.
-  app.get('/api/health', (req, res) => {
-    const mongo = describeMongoStatus();
-    const storage = describeStorageStatus();
-    const content = describePersistenceStatus();
-    res.json({
-      status: 'ok',
-      time: new Date().toISOString(),
-      mongo: { configured: mongo.configured, connected: mongo.connected, state: mongo.state },
-      storage: {
-        provider: storage.provider,
-        configured: storage.configured,
-        durable: storage.durable,
-        cloudName: storage.cloudName,
-        folder: storage.folder,
-        lastCheck: storage.lastCheck,
-        hint: storage.hint,
-        documents: storage.documents,
-      },
-      content: {
-        source: content.source,
-        durable: content.durable,
-        lastSavedAt: content.lastDbSaveAt,
-        hint: content.hint,
-      },
-    });
-  });
+  app.get('/api/health', getHealth);
 
   // API Routes
   app.use('/api', apiRouter);
@@ -192,8 +160,26 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath, { maxAge: '7d', immutable: true }));
-    // SPA fallback for client-side routes
+    // Hashed bundles (/assets/index-<hash>.js) never change → cache for a year.
+    // A missing bundle is a real 404, never index.html served as JavaScript.
+    app.use('/assets', express.static(path.join(distPath, 'assets'), { maxAge: '1y', immutable: true }));
+    app.use('/assets', (_req, res) => {
+      res.status(404).type('text/plain').send('Not found');
+    });
+    // Other static files (favicon, robots.txt …) may change between deploys.
+    app.use(
+      express.static(distPath, {
+        index: false,
+        maxAge: '1h',
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache');
+        },
+      })
+    );
+    // SPA fallback for client-side routes. index.html must be revalidated on
+    // every load: it used to be cached "immutable" for 7 days, so after a
+    // deploy the admin panel kept running the previous build (stale fixes,
+    // stale warnings) until the browser cache expired.
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) {
         return next();
@@ -202,6 +188,7 @@ async function startServer() {
       if (!fs.existsSync(indexHtml)) {
         return next();
       }
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(indexHtml);
     });
   }

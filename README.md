@@ -80,7 +80,8 @@ Open **http://localhost:3000** for the public site and **http://localhost:3000/a
 > green message — and the next deploy wiped the folder. That fallback has been **deleted**: `server/services/storage.ts`
 > has exactly one destination (Cloudinary). If it is not configured, `POST /api/uploads/*` answers
 > **503 with the reason**, the picker shows a red toast, and nothing is saved — silence is now impossible.
-> The admin dashboard also shows a red banner until Cloudinary **and** MongoDB are configured correctly.
+> The admin dashboard also shows a red banner until Cloudinary **and** MongoDB are configured correctly
+> (see “Cloudinary is not connected — but the pictures load?” below for what each colour means).
 
 ### Minimum environment for a live server (Render → *Environment*)
 
@@ -102,6 +103,41 @@ After saving the variables, redeploy once and open **/admin** — the banner at 
 
 There is nothing to switch on: local-disk storage no longer exists in the code base, so the same
 Cloudinary rules apply in development and in production.
+
+### “Cloudinary is not connected” — but the pictures load?
+
+Pictures that are already on the site load straight from Cloudinary's public CDN
+(`https://res.cloudinary.com/<cloud>/…`) — **no API key or secret is involved**. Only *new uploads* use
+the key and secret, so broken credentials never show up on the public site. The admin banner checks the
+credentials themselves:
+
+| Banner | Meaning | What to do |
+| --- | --- | --- |
+| green “সব ঠিক আছে — Cloudinary সংযুক্ত” | Cloudinary accepted the credentials | nothing |
+| grey “যাচাই করা হচ্ছে…” | the check is still running (right after a restart) | wait a few seconds |
+| amber “সাময়িকভাবে পৌঁছানো যাচ্ছে না” | network trouble / Cloudinary outage — **not** a credential problem | nothing; it re-checks automatically (15 s → 5 min) |
+| red, names the value (cloud name / API key / API secret / permission) | Cloudinary rejected that value; the banner shows Cloudinary's own answer and which variable each value came from | fix that variable, restart, press **আবার যাচাই** |
+
+How the check works (`server/services/storage.ts`, `server/config/cloudinaryEnv.ts`):
+
+- **Values are cleaned first.** Surrounding quotes, leading/trailing spaces or newlines, a trailing comma,
+  invisible zero-width characters and a pasted `CLOUDINARY_API_KEY=` prefix are stripped (hosting panels and
+  copy-paste add these, and Cloudinary then answers *Invalid cloud_name* / *Unknown API key* / *Invalid
+  Signature*). Each correction is listed in the banner so the variable can be tidied up. Common alternative
+  names (`CLOUDINARY_SECRET`, `CLOUDINARY_KEY`, `CLOUD_NAME`, …) are accepted, and a separate variable wins
+  over the same part of `CLOUDINARY_URL`. A malformed `CLOUDINARY_URL` is ignored instead of crashing the server.
+- **It runs in the background and repeats.** The check never delays the server start and is retried
+  automatically after a failure; **আবার যাচাই** runs a fresh one (`GET /api/storage/status?verify=1`).
+- **The Upload API has the last word.** If the Admin API refuses the ping — it can be restricted on its own
+  (Settings → Security → allowed Admin API IPs, or an API key role without Admin permissions) while uploads
+  work — a 1×1 test image is uploaded (and deleted) instead.
+- **One bad file is not a broken connection.** A file Cloudinary refuses (e.g. larger than the plan allows)
+  gets its own message (HTTP 413/422) and does not turn the banner red.
+
+`GET /api/storage/status` (signed-in panel users) returns the same status as `/api/health` plus diagnostics:
+the cloud name, the **masked** API key, the secret's length (never the secret), which variable each value
+came from, the automatic corrections, and the cloud names the saved images point at — a mismatch there
+means the credentials belong to a different Cloudinary account than the pictures.
 
 ## 🔐 Admin accounts
 
@@ -275,8 +311,8 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 | `BOOTSTRAP_ADMIN_EMAIL` | first run | Email of the automatically created first admin |
 | `BOOTSTRAP_ADMIN_PASSWORD` | first run | Password of the first admin (min. 8 chars) |
 | `BOOTSTRAP_ADMIN_NAME` | no | Display name of the first admin |
-| `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET` | **yes in prod** | Cloudinary for all uploads (incl. video). Without it, production uploads are refused |
-| `CLOUDINARY_URL` | no | Alternative single-string Cloudinary credential |
+| `CLOUDINARY_CLOUD_NAME` / `API_KEY` / `API_SECRET` | **yes in prod** | Cloudinary for all uploads (incl. video). Without it, production uploads are refused. Stray quotes/spaces are stripped automatically; `CLOUDINARY_SECRET`, `CLOUDINARY_KEY`, `CLOUD_NAME` … are accepted as alternative names |
+| `CLOUDINARY_URL` | no | Alternative single-string Cloudinary credential (`cloudinary://KEY:SECRET@CLOUD`); a separate variable above overrides the matching part |
 | `CLOUDINARY_FOLDER` | no (default `vdo_bogura`) | Root folder inside the Cloudinary media library; each kind gets a sub-folder (`gallery`, `hero`, `videos`, …) |
 | `MAX_IMAGE_UPLOAD_MB` | no (default 10) | Max size of one image (gallery, hero, thumbnails, logos) |
 | `MAX_VIDEO_UPLOAD_MB` | no (default 512) | Max size of one uploaded video (`MAX_UPLOAD_MB` is still accepted as the legacy name) |
@@ -285,7 +321,7 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 
 ## 📄 API overview (all under `/api`)
 
-`health` (Mongo / Cloudinary / content-persistence status), `auth/status` (Mongo + whether first-run setup is needed), `auth/setup` (create the first admin when the collection is empty), `auth/login`, `auth/me`, `admins` (GET/POST/PUT/DELETE, admin role only), `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
+`health` (Mongo / Cloudinary / content-persistence status), `storage/status` (same + credential diagnostics, signed-in users; `?verify=1` re-checks Cloudinary now), `auth/status` (Mongo + whether first-run setup is needed), `auth/setup` (create the first admin when the collection is empty), `auth/login`, `auth/me`, `admins` (GET/POST/PUT/DELETE, admin role only), `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
 `gallery/albums` (+ `/photos`), `committee`, `partners`, `career` (+ `/applications`),
 `stats`, `settings`, `page-content`, plus the upload endpoints `uploads/image`, `uploads/logo`,
 `uploads/video`, `uploads/document`, `uploads/cv`, `uploads/limits` and `uploads/discard`.

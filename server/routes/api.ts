@@ -4,6 +4,7 @@ import { authenticateJwt, requireAdmin } from '../middleware/auth';
 import { createRateLimit } from '../middleware/rateLimit';
 import { asyncHandler } from '../utils/asyncHandler';
 import { discardAsset, respondWithAsset } from '../controllers/uploadController';
+import { getStorageStatus } from '../controllers/storageController';
 
 const loginRateLimiter = createRateLimit(20, 15 * 60 * 1000);
 /** Anonymous visitors may only upload a CV, and only a handful of times. */
@@ -103,6 +104,9 @@ router.get('/uploads/limits', (_req, res) => res.json(limitsForClient()));
 
 // Uploaded but abandoned (admin pressed "remove" before saving) — clean it up.
 router.post('/uploads/discard', authenticateJwt, asyncHandler(discardAsset));
+
+// Cloudinary / MongoDB status for the admin banner (`?verify=1` = check again now).
+router.get('/storage/status', authenticateJwt, asyncHandler(getStorageStatus));
 
 /* ---------------------------------------------------------------------------
  * All content endpoints below are JSON-only now: the media file has already
