@@ -9,7 +9,10 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "create-admin": "tsx scripts/create-admin.ts"
+    "create-admin": "tsx scripts/create-admin.ts",
+    "test:content": "tsx scripts/smoke-test.ts",
+    "test:e2e": "tsx scripts/e2e-test.ts",
+    "check": "tsx scripts/run-check.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -9,8 +9,20 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import apiRouter from './server/routes/api';
-import { loadStore, flushStore, syncStoreWithDatabase } from './server/config/persistence';
-import { connectMongo, startMongoReconnectLoop } from './server/config/mongo';
+import {
+  ContentNotDurableError,
+  describePersistenceStatus,
+  flushStore,
+  syncStoreWithDatabase,
+} from './server/config/persistence';
+import { connectMongo, isDatabaseReady, startMongoReconnectLoop } from './server/config/mongo';
+import {
+  autoRestoreIfEmpty,
+  backupOnShutdown,
+  describeBackupStatus,
+  startBackupScheduler,
+  stopBackupScheduler,
+} from './server/services/backupService';
 import { bootstrapAdminFromEnv } from './server/services/adminService';
 import { getJwtSecret, isEphemeralHost } from './server/config/env';
 import { StorageError, verifyStorageConnection } from './server/services/storage';
@@ -44,6 +56,12 @@ function errorHandler(err: Error, req: express.Request, res: express.Response, _
   // Upload refused because it could not be stored durably (no Cloudinary on an
   // ephemeral host, or Cloudinary rejected the file). This is an expected,
   // already-explained condition: log one line, not a stack trace.
+  if (err instanceof ContentNotDurableError) {
+    // The change was NOT saved: say so instead of returning a fake success.
+    console.warn('[content] write refused:', err.message.split('\n')[0]);
+    return res.status(503).json({ error: err.code, message: err.message });
+  }
+
   if (err instanceof StorageError || err instanceof AmStorageError) {
     console.warn('[upload] refused:', err.message.split('\n')[0]);
     return res.status(err.status).json({ error: err.code, message: err.message });
@@ -82,6 +100,41 @@ function errorHandler(err: Error, req: express.Request, res: express.Response, _
   res.status(500).json({ error: 'Internal server error', message: 'সার্ভারে সমস্যা হয়েছে। আবার চেষ্টা করুন।' });
 }
 
+/**
+ * Load the site content from MongoDB and make sure the safety nets are in
+ * place. Called on the first connection and after every reconnection.
+ *
+ *  1. read every collection into the in-memory store;
+ *  2. if the database is empty, import the previous architecture's data
+ *     (legacy `sitecontents` blob, then an old `data/store.json`);
+ *  3. if it is *still* empty, restore the newest automatic snapshot — this is
+ *     what turns "everything is gone after the update" into "the site came back
+ *     on its own";
+ *  4. start the snapshot scheduler and create the first admin account.
+ */
+async function bringContentOnline(): Promise<void> {
+  if (!isDatabaseReady()) return;
+  const report = await syncStoreWithDatabase();
+  if (report.migratedFrom) {
+    console.log(`[persistence] content imported from ${report.migratedFrom} into MongoDB collections.`);
+  }
+  if (report.empty) {
+    const restored = await autoRestoreIfEmpty();
+    if (restored) {
+      console.warn(
+        `[persistence] restored ${restored.totalItems} records from snapshot ${restored.id} (${restored.createdAt}).`
+      );
+    }
+  }
+  await bootstrapAdminFromEnv();
+  if (!schedulerStarted) {
+    schedulerStarted = true;
+    startBackupScheduler();
+  }
+}
+
+let schedulerStarted = false;
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
@@ -101,34 +154,29 @@ async function startServer() {
     app.use('/uploads', express.static(uploadsPath, { maxAge: isProduction ? '30d' : 0, immutable: isProduction }));
   }
 
-  // Warm the in-memory store from the local JSON cache first (instant boot);
-  // MongoDB — the source of truth — is layered on top right after connecting.
-  const loaded = loadStore();
-  if (loaded) {
-    console.log('Loaded cached content from data/store.json');
-  } else {
-    console.log('No local content cache found (data/store.json).');
-  }
-
   // Fail fast when the JWT signing key is missing in production.
   getJwtSecret();
 
-  // Admin accounts AND all site content live in MongoDB. Without a connection
-  // nobody can sign in to the admin panel (there are no fallback / demo
-  // credentials by design) and content edits would only reach the local disk.
+  /**
+   * Admin accounts AND all site content live in MongoDB — every hero slide,
+   * news item, photo, stat and setting is a document in its own collection.
+   * Nothing is read from or written to the container's disk, so a deploy can
+   * no longer wipe content.
+   */
   const mongoOk = await connectMongo();
   if (mongoOk) {
-    await syncStoreWithDatabase();
-    await bootstrapAdminFromEnv();
-  } else if (isEphemeralHost()) {
+    await bringContentOnline();
+  } else {
+    const where = isEphemeralHost()
+      ? 'this host wipes its disk on every deploy'
+      : 'only the running process holds any content';
     console.error(
-      '[persistence] WARNING: MongoDB is not connected and this host wipes its disk on every deploy — ' +
-        'admin content will NOT survive the next deploy until MONGODB_URI works.'
+      `[persistence] WARNING: MongoDB is not reachable and ${where} — every content edit will be refused ` +
+        '(503) until MONGODB_URI works. Nothing is silently lost, but nothing can be saved either.'
     );
   }
   startMongoReconnectLoop(async () => {
-    await syncStoreWithDatabase();
-    await bootstrapAdminFromEnv();
+    await bringContentOnline();
   });
 
   // File storage: Cloudinary is the only place media is kept. The connection
@@ -198,23 +246,44 @@ async function startServer() {
   app.use(errorHandler);
 
   app.listen(PORT, '0.0.0.0', () => {
+    const content = describePersistenceStatus();
+    const backup = describeBackupStatus();
     console.log(
       `Palli Unnayan Sangstha NGO Application running at http://0.0.0.0:${PORT} (${
         isProduction ? 'production' : 'development'
       })`
     );
+    console.log(
+      `[persistence] content: ${content.totalItems} records from ${content.source} — ` +
+        `${content.durable ? 'durable in MongoDB' : 'NOT DURABLE'}` +
+        `${content.hint ? ` (${content.hint})` : ''}`
+    );
+    console.log(
+      `[backup] ${backup.enabled ? `enabled every ${backup.intervalMinutes} min, keeping ${backup.keep}` : 'disabled'}` +
+        `${backup.lastBackupAt ? `, last snapshot ${backup.lastBackupAt}` : ', no snapshot yet'}`
+    );
   });
 
-  // Flush pending content changes (file cache + MongoDB) on shutdown
+  // Flush pending content changes to MongoDB and leave a final snapshot on a
+  // graceful shutdown (a deploy, a restart) so nothing that was edited between
+  // two scheduled backups can be lost.
   let shuttingDown = false;
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    const forceExit = setTimeout(() => process.exit(0), 5000);
+    const forceExit = setTimeout(() => process.exit(0), 8000);
     forceExit.unref();
-    flushStore()
-      .catch((err) => console.error('[persistence] Flush on shutdown failed:', err))
-      .finally(() => process.exit(0));
+    void (async () => {
+      try {
+        await flushStore();
+        await backupOnShutdown();
+      } catch (err) {
+        console.error('[persistence] Flush on shutdown failed:', err);
+      } finally {
+        stopBackupScheduler();
+        process.exit(0);
+      }
+    })();
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

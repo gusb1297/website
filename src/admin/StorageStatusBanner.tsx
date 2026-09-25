@@ -84,10 +84,29 @@ interface StatusResponse {
     documents?: { provider: 'am-storage'; configured: boolean; host: string };
   };
   content?: {
-    source: 'mongodb' | 'file' | 'none';
+    source: 'mongodb' | 'legacy-blob' | 'local-file' | 'backup' | 'none';
     durable: boolean;
+    loaded?: boolean;
+    counts?: Record<string, number>;
+    totalItems?: number;
+    pendingWrites?: number;
     lastSavedAt: string | null;
+    lastLoadedAt?: string | null;
+    /** Records still pointing at the removed local /uploads folder. */
+    legacyLocalAssets?: number;
     hint?: string;
+  };
+  /** Automatic snapshots (see /admin → ব্যাকআপ ও রিস্টোর). */
+  backup?: {
+    enabled: boolean;
+    intervalMinutes: number;
+    keep: number;
+    count: number | null;
+    lastBackupAt: string | null;
+    nextRunAt: string | null;
+    lastError: string | null;
+    mirror?: { enabled: boolean; host: string; lastError: string | null } | null;
+    autoRestored?: { backupId: string; createdAt: string; at: string } | null;
   };
   /** Only from /api/storage/status (signed-in users). Never contains the secret. */
   diagnostics?: {
@@ -466,6 +485,30 @@ export const StorageStatusBanner: React.FC = () => {
     }
   }
 
+  if (status.backup?.enabled && !status.backup.lastBackupAt && contentDurable) {
+    problems.push({
+      key: 'backup',
+      area: 'content',
+      tone: 'warn',
+      title: 'এখনো কোনো স্বয়ংক্রিয় ব্যাকআপ তৈরি হয়নি।',
+      detail:
+        `প্রতি ${status.backup.intervalMinutes} মিনিটে (এবং প্রতি এডিটের পর) স্বয়ংক্রিয়ভাবে নেওয়া হয় — অ্যাডমিন ড্যাশবোর্ডের ` +
+        '“ব্যাকআপ ও রিস্টোর” ট্যাব থেকে এখনই একটি তৈরি করতে পারেন।',
+    });
+  }
+
+  if (content?.legacyLocalAssets) {
+    problems.push({
+      key: 'legacy-assets',
+      area: 'media',
+      tone: 'warn',
+      title: `${content.legacyLocalAssets}টি ছবি/ফাইল এখনো “/uploads/…” পুরনো লোকাল ঠিকানায় নির্দেশ করছে।`,
+      detail:
+        'এগুলো কোনো সময় সার্ভারের নিজস্ব ডিস্কে সেভ হয়েছিল, যা ডিপ্লয়ের সময় মুছে যায় — তাই সেগুলো আর কখনোই লোড হবে না। ' +
+        'সংশ্লিষ্ট রেকর্ডগুলো খুলে ছবি/ফাইলটি আবার আপলোড করুন (এবার Cloudinary/AM Storage-এ সংরক্ষিত হবে)।',
+    });
+  }
+
   const recheckButton = (className: string) => (
     <button
       onClick={recheck}
@@ -580,7 +623,15 @@ export const StorageStatusBanner: React.FC = () => {
             <p className="pt-1 opacity-80">
               বর্তমান অবস্থা: কন্টেন্ট →{' '}
               <strong>
-                {content?.source === 'mongodb' ? 'MongoDB' : content?.source === 'file' ? 'লোকাল ফাইল (ডেটা ক্যাশ)' : 'কিছুই না'}
+                {content?.source === 'mongodb'
+                  ? 'MongoDB'
+                  : content?.source === 'backup'
+                    ? 'MongoDB (স্বয়ংক্রিয় ব্যাকআপ থেকে পুনরুদ্ধার)'
+                    : content?.source === 'legacy-blob'
+                      ? 'MongoDB (পুরনো স্টোর থেকে স্থানান্তরিত)'
+                      : content?.source === 'local-file'
+                        ? 'MongoDB (পুরনো data/store.json থেকে স্থানান্তরিত)'
+                        : 'কিছুই না'}
               </strong>
               {' · '}মিডিয়া →{' '}
               <strong>
@@ -594,6 +645,18 @@ export const StorageStatusBanner: React.FC = () => {
                 <>
                   {' · '}PDF/নথি →{' '}
                   <strong>{storage.documents.configured ? `AM Storage (${storage.documents.host})` : 'কনফিগার করা নেই'}</strong>
+                </>
+              ) : null}
+              {status.backup ? (
+                <>
+                  {' · '}ব্যাকআপ →{' '}
+                  <strong>
+                    {status.backup.enabled
+                      ? status.backup.lastBackupAt
+                        ? `${new Date(status.backup.lastBackupAt).toLocaleString('bn-BD')} (${status.backup.count ?? 0}টি)`
+                        : 'এখনো কোনো স্ন্যাপশট নেই'
+                      : 'বন্ধ'}
+                  </strong>
                 </>
               ) : null}
               {check ? <> {' · '}</> : null}
