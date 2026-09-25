@@ -52,6 +52,8 @@ export interface ContentCollection {
     update: Record<string, unknown>,
     options?: { upsert?: boolean }
   ): Promise<void>;
+  /** Idempotent `createIndex`. Failures are logged, never fatal. */
+  ensureIndex(keys: Record<string, 1 | -1>, options?: { unique?: boolean }): Promise<void>;
 }
 
 export type CollectionFactory = (name: string) => ContentCollection;
@@ -116,6 +118,13 @@ function mongoCollection(name: string): ContentCollection {
 
     async updateOne(filter, update, options) {
       await collection().updateOne(filter, update, { upsert: Boolean(options?.upsert) });
+    },
+
+    async ensureIndex(keys, options) {
+      await collection().createIndex(keys, {
+        background: true,
+        unique: Boolean(options?.unique),
+      });
     },
   };
 }

@@ -149,6 +149,10 @@ export function createMemoryMongo(initial?: Record<string, ContentDoc[]>): Memor
       return removed;
     },
 
+    async ensureIndex() {
+      /* the in-memory substitute answers instantly — nothing to build */
+    },
+
     async updateOne(filter, update, options) {
       const current = list(name);
       const doc = current.find((item) => matches(item, filter));

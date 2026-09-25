@@ -113,6 +113,8 @@ let emptiedAt: string | null = null;
 let totalAtLoad = 0;
 /** Largest number of records this process has ever seen (after a migration…). */
 let maxTotalSeen = 0;
+/** Indexes are created once per process, after the first successful load. */
+let indexesEnsured = false;
 
 /** True when the current emptiness is intentional (an admin deleted it all). */
 export function isEmptyByAdmin(): boolean {
@@ -220,6 +222,35 @@ function totalFromCounts(counts: Record<string, number>): number {
   for (const [key] of ARRAY_COLLECTIONS) total += counts[key] || 0;
   total += counts.settings || 0;
   return total;
+}
+
+/**
+ * Create the indexes the content collections are queried by.
+ *
+ * Runs once, in the background, after the first successful load: every lookup
+ * in this module filters on `id` (albums on `albumId`, applications on
+ * `careerId`, snapshots on `createdAt`), and MongoDB would otherwise scan the
+ * whole collection for each of them. Index creation is idempotent and a failure
+ * is logged, never fatal — the site keeps working either way.
+ */
+export async function ensureIndexes(): Promise<void> {
+  const plan: Array<[string, Record<string, 1 | -1>]> = [
+    ...ARRAY_COLLECTIONS.map(([, name]) => [name, { id: 1 }] as [string, Record<string, 1 | -1>]),
+    ['sitesettings', { key: 1 }],
+    ['pagecontents', { key: 1 }],
+    ['contentmeta', { id: 1 }],
+    ['galleryphotos', { albumId: 1 }],
+    ['applications', { careerId: 1 }],
+    [BACKUP_COLLECTION, { createdAt: -1 }],
+    [BACKUP_COLLECTION, { id: 1 }],
+  ];
+  for (const [name, keys] of plan) {
+    try {
+      await contentCollection(name).ensureIndex(keys);
+    } catch (err) {
+      console.warn(`[content] could not create the index on ${name}:`, (err as Error).message);
+    }
+  }
 }
 
 /** Read every collection into the in-memory store. */
@@ -399,6 +430,10 @@ export function loadContent(): Promise<LoadReport> {
       }
 
       source = 'mongodb';
+      if (!indexesEnsured) {
+        indexesEnsured = true;
+        void ensureIndexes();
+      }
       return report('mongodb', null, at);
     } catch (err) {
       lastError = (err as Error).message;
@@ -708,4 +743,5 @@ export function resetContentState(): void {
   emptiedAt = null;
   totalAtLoad = 0;
   maxTotalSeen = 0;
+  indexesEnsured = false;
 }
