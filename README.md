@@ -34,10 +34,21 @@ admin panel without touching code.
 - **No public header/footer on admin routes** – the admin panel is a standalone, independent shell.
 - **Site-wide theming** – two CSS custom properties (`--site-primary`, `--site-accent`) drive every brand
   color; changing them in admin recolors the whole site (Tailwind palette is mapped onto the tokens).
-- **Persistence** – all content (hero slides, news, gallery records, settings, page copy, …) is saved
-  in **MongoDB** (`sitecontents` collection, debounced + flushed on shutdown), so admin edits survive
-  restarts **and redeploys**. `data/store.json` is only a local cache (and the sole store in development
-  without MongoDB); on first boot an existing `store.json` is migrated into MongoDB automatically.
+- **Persistence – MongoDB only, one collection per content type** – every hero slide, program, news
+  item, video, notice, publication, album, photo, committee member, partner, circular, application,
+  stat, the settings and the page copy is **its own document in its own MongoDB collection**
+  (`heroslides`, `programs`, `newsitems`, `videos`, `notices`, `publications`, `galleryalbums`,
+  `galleryphotos`, `committeemembers`, `partners`, `careers`, `applications`, `stats`, `sitesettings`,
+  `pagecontents`). The old “one JSON blob + a `data/store.json` cache” design is **gone**: nothing is
+  ever written to the server's disk, so a deploy can no longer wipe content. Writes are diffed, so
+  only the collections that really changed are sent to MongoDB.
+- **Fail-closed** – if MongoDB is unreachable an admin save is answered with **503 “not saved”**
+  instead of a green tick followed by data loss, and the change is pushed as soon as the connection
+  returns. An empty in-memory store can never overwrite populated collections.
+- **Automatic backups** – point-in-time snapshots of the whole content (MongoDB `contentbackups` +
+  a copy on AM Storage): on a schedule, after edits, before every restore and on shutdown. **If the
+  database ever turns out to be empty at boot, the newest snapshot is restored automatically**, and
+  the admin panel can list / download / restore / upload snapshots.
 - **Uploads** – **Cloudinary** in production (videos use chunked `upload_large`, so large files do not
   fail). On hosts whose disk is wiped on every deploy (Render, Heroku, Railway, Fly, Vercel) or when
   `NODE_ENV=production`, an upload is *refused with a clear message* if Cloudinary is missing instead of
@@ -71,17 +82,39 @@ Open **http://localhost:3000** for the public site and **http://localhost:3000/a
 | Data | Stored in | If missing |
 | --- | --- | --- |
 | Admin accounts | MongoDB (`admins`) | nobody can log in |
-| **All site content** (slides, programs, news, videos, gallery records, notices, publications, committee, partners, stats, settings, page copy, CV applications) | MongoDB (`sitecontents`, one document) — `data/store.json` is only a cache | content lives only in `data/store.json` and **is wiped on every deploy** on Render/Heroku/Railway |
+| **All site content** (slides, programs, news, videos, gallery records, notices, publications, committee, partners, stats, settings, page copy, CV applications) | **MongoDB — one document per record, one collection per type** | **no edit can be saved** (the panel answers 503 “সংরক্ষণ করা যায়নি”) — nothing is silently lost, and nothing is written to the disk |
 | **Uploaded images & videos** | Cloudinary only | every upload is **refused** with an explanatory (Bengali) error — there is deliberately **no local-disk fallback any more** |
 | **Uploaded documents** (PDFs, DOC/DOCX/TXT, applicant CVs) | AM Storage gateway (`server/services/amStorage.ts`, `POST /api/v1/storage/upload`) — Cloudinary cannot host the site's PDFs | the upload is **refused** with a 503 + reason; override the built-in credentials with `AM_STORAGE_BRIDGE_URL`, `AM_STORAGE_KEY_ID`, `AM_STORAGE_KEY_SECRET` (`AM_STORAGE_AUTH_MODE=hmac` for signed requests) |
 
-> **Why photos used to disappear after every update:** the old upload code wrote the file into
-> `./uploads` on the container's own disk whenever Cloudinary was missing, returned HTTP 200 and showed a
-> green message — and the next deploy wiped the folder. That fallback has been **deleted**: `server/services/storage.ts`
-> has exactly one destination (Cloudinary). If it is not configured, `POST /api/uploads/*` answers
-> **503 with the reason**, the picker shows a red toast, and nothing is saved — silence is now impossible.
-> The admin dashboard also shows a red banner until Cloudinary **and** MongoDB are configured correctly
-> (see “Cloudinary is not connected — but the pictures load?” below for what each colour means).
+> **Why content used to disappear after every update:** the old design kept every record in ONE JSON
+> document (`sitecontents`) plus a `data/store.json` file on the container's own disk — and on Render /
+> Heroku / Railway that disk is wiped on every deploy. One bad write (or a database that was not
+> reachable at boot) therefore emptied the whole site. Both are gone: content is one document per
+> record in MongoDB, nothing is written to the disk, an unreachable database refuses the edit instead
+> of losing it, and the newest automatic snapshot is restored when a database ever comes up empty.
+>
+> **Photos:** the old upload code wrote files into `./uploads` on the container disk whenever Cloudinary
+> was missing, returned HTTP 200 and showed a green message — and the next deploy wiped the folder.
+> That fallback has been **deleted**: `server/services/storage.ts` has exactly one destination
+> (Cloudinary). If it is not configured, `POST /api/uploads/*` answers **503 with the reason**, the
+> picker shows a red toast, and nothing is saved — silence is now impossible. The admin dashboard also
+> shows a red banner until Cloudinary **and** MongoDB are configured correctly (see “Cloudinary is not
+> connected — but the pictures load?” below for what each colour means).
+
+### 🔍 Analysis: why content disappeared — and what prevents it now
+
+| # | What could go wrong before | What happens now |
+| --- | --- | --- |
+| 1 | Content lived in **one** MongoDB document (`sitecontents`) *plus* a `data/store.json` file on the container disk. One failed/partial write emptied the whole site. | Every record is its own document in its own collection. A bad write can only affect the record being saved. |
+| 2 | Render/Heroku/Railway **delete the disk on every deploy**, so any content that only existed in `data/store.json` was gone after the update. | Nothing is ever written to the disk. There is no file to lose. |
+| 3 | When MongoDB was unreachable the server still answered “saved”, kept the edit in memory — and lost it on the next restart. | An unreachable database makes the save fail with **503**; the change stays queued and is written the moment the connection returns. |
+| 4 | A fresh deploy pointing at an empty/wrong database showed an empty site with no explanation. | On boot an empty database is first filled from the previous architecture (`sitecontents` blob → `data/store.json`) and then from the newest **automatic snapshot**; the admin banner reports exactly where the content came from. |
+| 5 | Pictures uploaded while Cloudinary was missing went to `./uploads`, answered HTTP 200 and vanished on the next deploy. | Uploads have exactly one destination: Cloudinary (images/videos) or the AM Storage gateway (PDFs). If either is unavailable the upload is **refused with the reason** — never silently “saved”. |
+| 6 | No way back after a loss. | **Automatic backups** every few hours, after edits, before restores and on shutdown — in MongoDB *and* on AM Storage — restorable from `/admin → ব্যাকআপ ও রিস্টোর` with one click. |
+
+Two checks make the state visible instead of silent: `GET /api/health`
+(`content.durable`, `content.source`, `content.counts`, `backup.*`) and the admin
+banner, which turns red while anything is not durable.
 
 ### Minimum environment for a live server (Render → *Environment*)
 
@@ -103,6 +136,52 @@ After saving the variables, redeploy once and open **/admin** — the banner at 
 
 There is nothing to switch on: local-disk storage no longer exists in the code base, so the same
 Cloudinary rules apply in development and in production.
+
+### 🛡️ Automatic backups & recovery (no more “all my data is gone”)
+
+The server snapshots the **entire** content (every collection, plus settings and page copy):
+
+| When | Why |
+| --- | --- |
+| every `BACKUP_INTERVAL_MINUTES` (default 6 h) | a daily safety net |
+| ~10 s after a content edit (at most one per `BACKUP_MIN_INTERVAL_MINUTES`, default 30 min) | protects the newest work |
+| before every restore | a mistaken restore can be undone |
+| on a graceful shutdown (deploy / restart) | nothing edited in between is lost |
+
+Each snapshot is written to the `contentbackups` MongoDB collection **and** mirrored to AM Storage as a
+`.txt` file (best effort). Retention keeps the newest `BACKUP_KEEP` snapshots (default 40); manual and
+pre-restore snapshots are pinned.
+
+**Recovery is automatic:** when the server boots and MongoDB holds *no content at all* while at least
+one snapshot exists, the newest snapshot is restored and the admin banner reports it. If an
+administrator deletes the last record **on purpose**, that decision is remembered (`contentmeta`) and
+the content is *not* resurrected.
+
+From **/admin → ব্যাকআপ ও রিস্টোর** (full administrators) you can:
+take a snapshot now, download any snapshot, restore it (a safety snapshot is written first), delete it,
+open the AM Storage cloud copy, or restore from a downloaded/uploaded backup file.
+
+```bash
+# API
+GET    /api/backups               # list + status
+POST   /api/backups               # snapshot now
+GET    /api/backups/:id/download  # download JSON
+POST   /api/backups/:id/restore   # restore (a pre-restore snapshot is taken first)
+DELETE /api/backups/:id
+POST   /api/backups/upload        # restore from an uploaded backup file
+```
+
+### ✅ Run check (do this before every deploy)
+
+```bash
+npm run check                     # type check + content tests + build + boot probe
+MONGODB_URI="mongodb://127.0.0.1:27017/gusb-check" npm run check   # + end-to-end database test
+```
+
+It (1) type-checks, (2) runs the 55-check content test (load / write / migration / backup / restore /
+fail-closed, no database needed), (3) builds the frontend and the server bundle, (4) boots the app and
+probes every public API route, and (5) — when `MONGODB_URI` is set — runs a real create → restart →
+wipe → auto-restore round trip in a throw-away database.
 
 ### “Cloudinary is not connected” — but the pictures load?
 
@@ -276,16 +355,26 @@ routes, serves `/api` and `/uploads`, and enables HSTS + long-lived static cachi
 
 ```
 server/
-  config/        mongo, persistence (JSON cache), env (JWT secret, ephemeral-host check)
-  controllers/   all API handlers (CRUD + auth + settings + page-content)
+  config/        mongo (connection + reachability), env (JWT secret, ephemeral-host check),
+                 contentDb.ts — the ONLY place MongoDB is touched (one collection per type),
+                 persistence.ts — the façade controllers call (`persistStore()` → 503 on failure)
+  controllers/   all API handlers (CRUD + auth + settings + page-content + backups)
                  uploadController.ts — returns the Cloudinary asset / discards an orphan
   middleware/    auth (JWT), rate limiting, upload.ts (multer → Cloudinary, JSON-only guard)
-  models/        mongoose schemas (incl. Admin) + empty content store
-  services/      adminService (MongoDB CRUD + bootstrap + first-run setup)
-                 storage.ts — the ONE place files are written (Cloudinary, no fallback)
+  models/        schemas.ts — Admin model + the in-memory content cache
+  services/      contentStore.ts  the content repository: load, diff-write, migrate, restore
+                 backupService.ts automatic snapshots (MongoDB + AM Storage) & auto-recovery
+                 adminService     MongoDB CRUD + bootstrap + first-run setup
+                 storage.ts       the ONE place files are written (Cloudinary, no fallback)
+                 amStorage.ts     PDF/document gateway bridge
   utils/         assets.ts (asset refs in JSON bodies + release-on-replace/delete)
   routes/api.ts  all /api routes
-scripts/create-admin.ts  CLI to add an admin (`npm run create-admin`)
+scripts/
+  create-admin.ts   CLI to add an admin (`npm run create-admin`)
+  run-check.ts      `npm run check` — type check + content test + build + boot probe + e2e
+  smoke-test.ts     55-check content test against an in-memory MongoDB (no database needed)
+  e2e-test.ts       live create → restart → wipe → auto-restore test (needs MONGODB_URI)
+  lib/memoryMongo.ts  the in-memory MongoDB substitute used by the tests
 src/
   admin/         admin dashboard + per-module managers
   components/    Navbar, Footer, HeroSlider, StatsCounter, cards, map, video, PDF
@@ -308,6 +397,11 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 | `JWT_SECRET` | **yes in prod** | Signs admin JWTs (min. 16 chars; random per restart in dev) |
 | `MONGODB_URI` | **yes** | MongoDB connection — stores all admin accounts **and all site content** |
 | `MONGODB_DB` | no (default `gusb`) | Database name when the URI path does not include one |
+| `BACKUP_ENABLED` | no (default `true`) | Automatic content snapshots |
+| `BACKUP_INTERVAL_MINUTES` | no (default `360`) | One snapshot at least this often |
+| `BACKUP_MIN_INTERVAL_MINUTES` | no (default `30`) | Minimum gap between two edit-triggered snapshots |
+| `BACKUP_KEEP` | no (default `40`) | How many snapshots are kept (manual/pre-restore ones are pinned) |
+| `BACKUP_MIRROR_AM_STORAGE` | no (default `true`) | `false` = keep snapshots in MongoDB only |
 | `BOOTSTRAP_ADMIN_EMAIL` | first run | Email of the automatically created first admin |
 | `BOOTSTRAP_ADMIN_PASSWORD` | first run | Password of the first admin (min. 8 chars) |
 | `BOOTSTRAP_ADMIN_NAME` | no | Display name of the first admin |
@@ -323,10 +417,12 @@ server.ts        Express app (security, persistence, vite dev / static prod)
 
 `health` (Mongo / Cloudinary / content-persistence status), `storage/status` (same + credential diagnostics, signed-in users; `?verify=1` re-checks Cloudinary now), `auth/status` (Mongo + whether first-run setup is needed), `auth/setup` (create the first admin when the collection is empty), `auth/login`, `auth/me`, `admins` (GET/POST/PUT/DELETE, admin role only), `hero-slides`, `programs`, `news`, `videos` (see below), `notices`, `publications`,
 `gallery/albums` (+ `/photos`), `committee`, `partners`, `career` (+ `/applications`),
-`stats`, `settings`, `page-content`, plus the upload endpoints `uploads/image`, `uploads/logo`,
-`uploads/video`, `uploads/document`, `uploads/cv`, `uploads/limits` and `uploads/discard`.
-Public reads are open; writes require a valid admin JWT (settings & page-content additionally require the
-`admin` role).
+`stats`, `settings`, `page-content`, the backup endpoints (`backups`, `backups/:id/download`,
+`backups/:id/restore`, `backups/upload` — admin role only), plus the upload endpoints `uploads/image`,
+`uploads/logo`, `uploads/video`, `uploads/document`, `uploads/cv`, `uploads/limits` and `uploads/discard`.
+Public reads are open; writes require a valid admin JWT (settings, page-content and backups additionally
+require the `admin` role). A write that could not reach MongoDB is answered with **503
+`content_not_durable`**, never with a fake success.
 
 ### How an upload works now
 

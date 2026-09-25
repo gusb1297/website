@@ -77,6 +77,14 @@ import {
   updatePageContent,
 } from '../controllers/ngoControllers';
 import { getAdmins, postAdmin, putAdmin, removeAdmin } from '../controllers/adminControllers';
+import {
+  createBackupHandler,
+  deleteBackupHandler,
+  downloadBackupHandler,
+  listBackupsHandler,
+  restoreBackupHandler,
+  restoreUploadedHandler,
+} from '../controllers/backupController';
 
 const router = Router();
 
@@ -216,5 +224,18 @@ router.put('/settings', authenticateJwt, requireAdmin, rejectMultipart, asyncHan
 // Page content (Home & About editable copy)
 router.get('/page-content', asyncHandler(getPageContent));
 router.put('/page-content', authenticateJwt, requireAdmin, asyncHandler(updatePageContent));
+
+/* ---------------------------------------------------------------------------
+ * CONTENT BACKUPS — automatic point-in-time snapshots of the whole site
+ * content (MongoDB + an AM Storage mirror). Restoring is only allowed for full
+ * administrators because it replaces every record.
+ * ------------------------------------------------------------------------- */
+router.get('/backups', authenticateJwt, requireAdmin, asyncHandler(listBackupsHandler));
+router.post('/backups', authenticateJwt, requireAdmin, asyncHandler(createBackupHandler));
+router.get('/backups/:id/download', authenticateJwt, requireAdmin, asyncHandler(downloadBackupHandler));
+router.post('/backups/:id/restore', authenticateJwt, requireAdmin, asyncHandler(restoreBackupHandler));
+router.delete('/backups/:id', authenticateJwt, requireAdmin, asyncHandler(deleteBackupHandler));
+// Uploading a snapshot is multipart, so it must not sit behind the JSON guard.
+router.post('/backups/upload', authenticateJwt, requireAdmin, asyncHandler(restoreUploadedHandler));
 
 export default router;

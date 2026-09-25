@@ -209,6 +209,28 @@ export async function uploadDocumentToAmStorage(options: {
   /** Free-text label stored next to the file (defaults to the file name). */
   title?: string;
 }): Promise<AmStoredFile> {
+  return uploadBytesToAmStorage({
+    buffer: await fs.promises.readFile(options.filePath),
+    fileName: options.originalName,
+    mimeType: options.mimeType,
+    title: options.title,
+  });
+}
+
+/**
+ * Upload bytes that never touched the disk (automatic content backups, …).
+ *
+ * Identical to `uploadDocumentToAmStorage` except that the caller already holds
+ * the content in memory: the server must never write its own files to the
+ * container disk, because that disk is wiped on every deploy.
+ */
+export async function uploadBytesToAmStorage(options: {
+  buffer: Buffer;
+  fileName?: string;
+  mimeType?: string;
+  /** Free-text label stored next to the file (defaults to the file name). */
+  title?: string;
+}): Promise<AmStoredFile> {
   const cfg = amStorageConfig();
   if (!isAmStorageConfigured()) {
     throw new AmStorageError(
@@ -216,9 +238,9 @@ export async function uploadDocumentToAmStorage(options: {
     );
   }
 
-  const fileName = (options.originalName || 'document.pdf').replace(/[/\\]/g, '_').slice(0, 180) || 'document.pdf';
-  const title = options.title?.trim() || titleFrom(options.originalName, 'Document');
-  const fileBytes = await fs.promises.readFile(options.filePath);
+  const fileName = (options.fileName || 'document.pdf').replace(/[/\\]/g, '_').slice(0, 180) || 'document.pdf';
+  const title = options.title?.trim() || titleFrom(options.fileName, 'Document');
+  const fileBytes = options.buffer;
 
   const { body, contentType } = buildMultipartBody([
     { name: 'file', value: fileBytes, fileName, contentType: contentTypeFor(fileName, options.mimeType) },

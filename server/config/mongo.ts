@@ -3,9 +3,10 @@ import mongoose from 'mongoose';
 /**
  * MongoDB connection helpers.
  *
- * Admin accounts are the only data that lives in MongoDB. Site content is
- * still stored in data/store.json. A configured URI is not enough — the
- * process must actually be connected before login / bootstrap can run.
+ * Admin accounts AND the whole site content live in MongoDB (one document per
+ * record, see services/contentStore.ts). A configured URI is not enough — the
+ * process must actually be connected before login / bootstrap / content
+ * loading can run.
  */
 
 let lastError: string | null = null;
@@ -38,8 +39,18 @@ export function isMongoConfigured(): boolean {
   return getMongoUri().length > 0;
 }
 
+/**
+ * Test seam: lets the suite (scripts/smoke-test.ts) simulate "MongoDB is
+ * reachable / unreachable" without a real server. Production never touches it.
+ */
+let readyOverride: (() => boolean) | null = null;
+
+export function setDatabaseReadyOverride(override: (() => boolean) | null): void {
+  readyOverride = override;
+}
+
 export function isDatabaseReady(): boolean {
-  return mongoose.connection.readyState === 1;
+  return readyOverride ? readyOverride() : mongoose.connection.readyState === 1;
 }
 
 export function getMongoLastError(): string | null {

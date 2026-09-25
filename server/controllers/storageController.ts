@@ -12,8 +12,9 @@
  * retried, so the banner does not stay red after the problem went away.
  */
 import type { Request, Response } from 'express';
-import { describeMongoStatus } from '../config/mongo';
+import { describeMongoStatus, isDatabaseReady } from '../config/mongo';
 import { describePersistenceStatus, healPersistence } from '../config/persistence';
+import { describeBackupStatus, listBackups } from '../services/backupService';
 import { memoryStore } from '../models/schemas';
 import {
   describeStorageCredentials,
@@ -22,10 +23,33 @@ import {
   refreshStorageStatusIfStale,
 } from '../services/storage';
 
-function statusPayload() {
+/**
+ * `backupCount` costs one database read, so it is only filled for the
+ * signed-in admin endpoint — /api/health stays a cheap public probe.
+ */
+/**
+ * Pictures / documents whose URL still points at the server's own `/uploads`
+ * folder. Those files were written by a version of this app that stored uploads
+ * on the container disk, so they are gone for good on any host that wipes it —
+ * the only fix is to upload them again (they then live on Cloudinary / AM
+ * Storage). Counting them turns "some images never load and nobody knows why"
+ * into a number the admin can act on.
+ */
+function legacyLocalAssetCount(): number {
+  let text = '';
+  try {
+    text = JSON.stringify(memoryStore);
+  } catch {
+    return 0;
+  }
+  return (text.match(/"\/uploads\//g) || []).length;
+}
+
+function statusPayload(backupCount?: number) {
   const mongo = describeMongoStatus();
   const storage = describeStorageStatus();
   const content = describePersistenceStatus();
+  const backup = { ...describeBackupStatus(), count: backupCount ?? null };
   return {
     status: 'ok' as const,
     time: new Date().toISOString(),
@@ -46,9 +70,17 @@ function statusPayload() {
     content: {
       source: content.source,
       durable: content.durable,
-      lastSavedAt: content.lastDbSaveAt,
+      loaded: content.loaded,
+      counts: content.counts,
+      totalItems: content.totalItems,
+      pendingWrites: content.pendingWrites,
+      lastSavedAt: content.lastSavedAt,
+      lastLoadedAt: content.lastLoadedAt,
+      /** Assets still pointing at the deleted local /uploads folder. */
+      legacyLocalAssets: legacyLocalAssetCount(),
       hint: content.hint,
     },
+    backup,
   };
 }
 
@@ -89,9 +121,10 @@ export async function getStorageStatus(req: Request, res: Response) {
   } else {
     refreshStorageStatusIfStale();
   }
+  const backupCount = isDatabaseReady() ? (await listBackups(500)).length : null;
   res.setHeader('Cache-Control', 'no-store');
   res.json({
-    ...statusPayload(),
+    ...statusPayload(backupCount ?? undefined),
     diagnostics: {
       cloudinary: describeStorageCredentials(),
       contentClouds: cloudsUsedByContent(),

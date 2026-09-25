@@ -15,6 +15,7 @@ import { ManageCommittee } from './ManageCommittee';
 import { ManagePages } from './ManagePages';
 import { ManageSettings } from './ManageSettings';
 import { ManageAdmins } from './ManageAdmins';
+import { ManageBackups } from './ManageBackups';
 import { StorageStatusBanner } from './StorageStatusBanner';
 import { AdminMobileNav } from './AdminMobileNav';
 import {
@@ -34,6 +35,7 @@ import {
   Handshake,
   LayoutTemplate,
   UserCog,
+  DatabaseBackup,
 } from 'lucide-react';
 
 type TabId =
@@ -50,6 +52,7 @@ type TabId =
   | 'committee'
   | 'content'
   | 'settings'
+  | 'backups'
   | 'admins';
 
 export const Dashboard: React.FC = () => {
@@ -101,8 +104,10 @@ export const Dashboard: React.FC = () => {
     { id: 'settings', label: 'ওয়েবসাইট সেটিংস & রঙ', icon: <Settings className="w-4 h-4" /> },
   ];
 
-  // Only full administrators can manage other admin accounts.
+  // Only full administrators can manage other admin accounts or restore the
+  // whole site content from a snapshot.
   if (user?.role === 'admin') {
+    navItems.push({ id: 'backups', label: 'ব্যাকআপ ও রিস্টোর', icon: <DatabaseBackup className="w-4 h-4" /> });
     navItems.push({ id: 'admins', label: 'অ্যাডমিন ব্যবস্থাপনা', icon: <UserCog className="w-4 h-4" /> });
   }
 
@@ -183,6 +188,7 @@ export const Dashboard: React.FC = () => {
             {activeTab === 'partners' && <ManagePartners />}
             {activeTab === 'stats' && <ManageStats />}
             {activeTab === 'settings' && <ManageSettings />}
+            {activeTab === 'backups' && user?.role === 'admin' && <ManageBackups />}
             {activeTab === 'admins' && user?.role === 'admin' && <ManageAdmins />}
           </div>
         </div>

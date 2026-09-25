@@ -6,7 +6,7 @@ import { randomUUID } from 'crypto';
 import { deleteAsset } from '../services/storage';
 import { parseVideoLink, formatDuration } from '../utils/videoSources';
 import { AssetRef, readAsset, readAssetList, releaseAsset, toBool } from '../utils/assets';
-import { persistStore } from '../config/persistence';
+import { persistStore, persistStoreQuiet } from '../config/persistence';
 import { getJwtSecret } from '../config/env';
 import { AdminServiceError, getAuthStatus, setupFirstAdmin, verifyCredentials } from '../services/adminService';
 import { AuthRequest } from '../middleware/auth';
@@ -191,7 +191,7 @@ export const createHeroSlide = async (req: Request, res: Response) => {
     isActive: toBool(req.body.isActive, true),
   };
   memoryStore.heroSlides.push(newSlide);
-  persistStore();
+  await persistStore();
   res.status(201).json(newSlide);
 };
 
@@ -218,7 +218,7 @@ export const updateHeroSlide = async (req: Request, res: Response) => {
   };
 
   memoryStore.heroSlides[index] = next;
-  persistStore();
+  await persistStore();
 
   // The replaced picture is no longer shown anywhere → drop it from Cloudinary.
   if (image && image.url !== previous.image) {
@@ -230,7 +230,7 @@ export const updateHeroSlide = async (req: Request, res: Response) => {
   res.json(next);
 };
 
-export const reorderHeroSlides = (req: Request, res: Response) => {
+export const reorderHeroSlides = async (req: Request, res: Response) => {
   const { slideIds } = req.body;
   if (Array.isArray(slideIds)) {
     slideIds.forEach((id: string, idx: number) => {
@@ -239,7 +239,7 @@ export const reorderHeroSlides = (req: Request, res: Response) => {
     });
   }
   memoryStore.heroSlides.sort((a, b) => a.order - b.order);
-  persistStore();
+  await persistStore();
   res.json(memoryStore.heroSlides);
 };
 
@@ -247,7 +247,7 @@ export const deleteHeroSlide = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.heroSlides.find((s) => s.id === id);
   memoryStore.heroSlides = memoryStore.heroSlides.filter((s) => s.id !== id);
-  persistStore();
+  await persistStore();
   if (target) {
     await releaseAsset({ url: target.image, publicId: target.imagePublicId }, (url) =>
       memoryStore.heroSlides.some((slide) => slide.image === url)
@@ -291,7 +291,7 @@ export const createProgram = async (req: Request, res: Response) => {
     districtsCovered: Number(req.body.districtsCovered || 0),
   };
   memoryStore.programs.push(newProgram);
-  persistStore();
+  await persistStore();
   res.status(201).json(newProgram);
 };
 
@@ -323,7 +323,7 @@ export const updateProgram = async (req: Request, res: Response) => {
   };
 
   memoryStore.programs[index] = next;
-  persistStore();
+  await persistStore();
 
   if (cover && cover.url !== previous.coverImage) {
     await releaseAsset({ url: previous.coverImage, publicId: previous.coverImagePublicId }, (url) =>
@@ -338,7 +338,7 @@ export const deleteProgram = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.programs.find((p) => p.id === id);
   memoryStore.programs = memoryStore.programs.filter((p) => p.id !== id);
-  persistStore();
+  await persistStore();
   if (target) {
     await releaseAsset({ url: target.coverImage, publicId: target.coverImagePublicId }, (url) =>
       memoryStore.programs.some((program) => program.coverImage === url)
@@ -369,7 +369,9 @@ export const getNewsBySlug = (req: Request, res: Response) => {
   const news = memoryStore.news.find((n) => n.slug === slug || n.id === slug);
   if (!news) return res.status(404).json({ error: 'News article not found' });
   news.views += 1;
-  persistStore();
+  // A view counter is nice-to-have: never fail a public page (or lose the
+  // article) because the database is briefly unreachable.
+  persistStoreQuiet();
   res.json(news);
 };
 
@@ -397,7 +399,7 @@ export const createNews = async (req: Request, res: Response) => {
     author: req.body.author || '',
   };
   memoryStore.news.unshift(newNews);
-  persistStore();
+  await persistStore();
   res.status(201).json(newNews);
 };
 
@@ -425,7 +427,7 @@ export const updateNews = async (req: Request, res: Response) => {
   };
 
   memoryStore.news[index] = next;
-  persistStore();
+  await persistStore();
 
   if (thumbnail && thumbnail.url !== previous.thumbnail) {
     await releaseAsset({ url: previous.thumbnail, publicId: previous.thumbnailPublicId }, (url) =>
@@ -440,7 +442,7 @@ export const deleteNews = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.news.find((n) => n.id === id);
   memoryStore.news = memoryStore.news.filter((n) => n.id !== id);
-  persistStore();
+  await persistStore();
   if (target) {
     await releaseAsset({ url: target.thumbnail, publicId: target.thumbnailPublicId }, (url) =>
       memoryStore.news.some((item) => item.thumbnail === url)
@@ -530,7 +532,7 @@ function buildEmbeddedVideo(body: VideoBody, thumbnailUrl?: string): VideoItem |
  * `type=upload` with a `filePath` asset, or `type=embed` with a link — the mode
  * is also detected automatically from what the form actually sent.
  */
-export const createVideo = (req: Request, res: Response) => {
+export const createVideo = async (req: Request, res: Response) => {
   const body = (req.body || {}) as VideoBody & Record<string, unknown>;
   const asset = readAsset(body, 'filePath', 'filePathPublicId', 'video');
   const poster = readAsset(body, 'thumbnail');
@@ -550,7 +552,7 @@ export const createVideo = (req: Request, res: Response) => {
     }
     const newVid = buildUploadedVideo(body, asset, poster);
     memoryStore.videos.unshift(newVid);
-    persistStore();
+    await persistStore();
     return res.status(201).json(newVid);
   }
 
@@ -566,7 +568,7 @@ export const createVideo = (req: Request, res: Response) => {
       });
     }
     memoryStore.videos.unshift(newVid);
-    persistStore();
+    await persistStore();
     return res.status(201).json(newVid);
   }
 
@@ -607,7 +609,7 @@ export const updateVideo = async (req: Request, res: Response) => {
     existing.thumbnailPublicId = poster.publicId;
   }
 
-  persistStore();
+  await persistStore();
 
   if (poster && previousPoster && poster.url !== previousPoster.url) {
     await releaseAsset(previousPoster, (url) => memoryStore.videos.some((v) => v.id !== id && v.thumbnail === url));
@@ -666,7 +668,7 @@ export const deleteVideo = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.videos.find((v) => v.id === id);
   memoryStore.videos = memoryStore.videos.filter((v) => v.id !== id);
-  persistStore();
+  await persistStore();
 
   if (target?.type === 'upload' && target.filePath) {
     if (target.publicId) {
@@ -719,7 +721,7 @@ export const createNotice = async (req: Request, res: Response) => {
     referenceNo: req.body.referenceNo || '',
   };
   memoryStore.notices.unshift(newNotice);
-  persistStore();
+  await persistStore();
   res.status(201).json(newNotice);
 };
 
@@ -746,7 +748,7 @@ export const updateNotice = async (req: Request, res: Response) => {
   };
 
   memoryStore.notices[index] = next;
-  persistStore();
+  await persistStore();
 
   if (pdf && pdf.url !== previous.pdfFile) {
     await releaseAsset({ url: previous.pdfFile, publicId: previous.pdfFilePublicId }, (url) =>
@@ -761,7 +763,7 @@ export const deleteNotice = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.notices.find((n) => n.id === id);
   memoryStore.notices = memoryStore.notices.filter((n) => n.id !== id);
-  persistStore();
+  await persistStore();
   if (target) {
     await releaseAsset({ url: target.pdfFile, publicId: target.pdfFilePublicId }, (url) =>
       memoryStore.notices.some((notice) => notice.pdfFile === url)
@@ -803,7 +805,7 @@ export const createPublication = async (req: Request, res: Response) => {
     thumbnailPublicId: cover?.publicId,
   };
   memoryStore.publications.unshift(newPub);
-  persistStore();
+  await persistStore();
   res.status(201).json(newPub);
 };
 
@@ -832,7 +834,7 @@ export const updatePublication = async (req: Request, res: Response) => {
   };
 
   memoryStore.publications[index] = next;
-  persistStore();
+  await persistStore();
 
   if (pdf && pdf.url !== previous.pdfFile) {
     await releaseAsset({ url: previous.pdfFile, publicId: previous.pdfFilePublicId }, (url) =>
@@ -852,7 +854,7 @@ export const deletePublication = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.publications.find((p) => p.id === id);
   memoryStore.publications = memoryStore.publications.filter((p) => p.id !== id);
-  persistStore();
+  await persistStore();
   if (target) {
     await releaseAsset({ url: target.pdfFile, publicId: target.pdfFilePublicId }, (url) =>
       memoryStore.publications.some((pub) => pub.pdfFile === url)
@@ -973,7 +975,7 @@ export const createAlbum = async (req: Request, res: Response) => {
   // Album + its pictures are committed together, preventing orphan records.
   memoryStore.galleryAlbums.unshift(newAlbum);
   memoryStore.galleryPhotos.push(...createdPhotos);
-  persistStore();
+  await persistStore();
   res.status(201).json({ ...galleryAlbumResponse(newAlbum), photos: createdPhotos });
 };
 
@@ -999,7 +1001,7 @@ export const updateAlbum = async (req: Request, res: Response) => {
   };
 
   memoryStore.galleryAlbums[index] = updatedAlbum;
-  persistStore();
+  await persistStore();
 
   // Do not remove a previous cover that is also one of the album's photos.
   if (cover && oldAlbum.coverImage && oldAlbum.coverImage !== cover.url) {
@@ -1022,7 +1024,7 @@ export const deleteAlbum = async (req: Request, res: Response) => {
   const albumPhotos = memoryStore.galleryPhotos.filter((photo) => photo.albumId === id);
   memoryStore.galleryAlbums = memoryStore.galleryAlbums.filter((item) => item.id !== id);
   memoryStore.galleryPhotos = memoryStore.galleryPhotos.filter((photo) => photo.albumId !== id);
-  persistStore();
+  await persistStore();
 
   // Remove each unique Cloudinary asset once. A URL still referenced by
   // another album/photo is deliberately retained.
@@ -1104,11 +1106,11 @@ export const addPhoto = async (req: Request, res: Response) => {
       coverStorage: 'cloudinary',
     };
   }
-  persistStore();
+  await persistStore();
   res.status(201).json(createdPhotos.length === 1 ? createdPhotos[0] : createdPhotos);
 };
 
-export const updatePhoto = (req: Request, res: Response) => {
+export const updatePhoto = async (req: Request, res: Response) => {
   const { id } = req.params;
   const index = memoryStore.galleryPhotos.findIndex((photo) => photo.id === id);
   if (index === -1) return res.status(404).json({ error: 'photo_not_found', message: 'ছবিটি পাওয়া যায়নি।' });
@@ -1116,7 +1118,7 @@ export const updatePhoto = (req: Request, res: Response) => {
   const caption = cleanGalleryText(req.body.caption);
   if (rejectGalleryText(res, { caption })) return;
   memoryStore.galleryPhotos[index] = { ...memoryStore.galleryPhotos[index], caption, id };
-  persistStore();
+  await persistStore();
   res.json(memoryStore.galleryPhotos[index]);
 };
 
@@ -1136,7 +1138,7 @@ export const deletePhoto = async (req: Request, res: Response) => {
       coverStorage: nextPhoto?.storage,
     };
   }
-  persistStore();
+  await persistStore();
 
   const stillReferenced =
     memoryStore.galleryPhotos.some((item) => item.image === photo.image) ||
@@ -1181,7 +1183,7 @@ export const createCommitteeMember = async (req: Request, res: Response) => {
     phone: req.body.phone,
   };
   memoryStore.committee.push(newMember);
-  persistStore();
+  await persistStore();
   res.status(201).json(newMember);
 };
 
@@ -1210,7 +1212,7 @@ export const updateCommitteeMember = async (req: Request, res: Response) => {
   };
 
   memoryStore.committee[index] = next;
-  persistStore();
+  await persistStore();
 
   if (photo && photo.url !== previous.photo) {
     await releaseAsset({ url: previous.photo, publicId: previous.photoPublicId }, (url) =>
@@ -1225,7 +1227,7 @@ export const deleteCommitteeMember = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.committee.find((c) => c.id === id);
   memoryStore.committee = memoryStore.committee.filter((c) => c.id !== id);
-  persistStore();
+  await persistStore();
   if (target) {
     await releaseAsset({ url: target.photo, publicId: target.photoPublicId }, (url) =>
       memoryStore.committee.some((member) => member.photo === url)
@@ -1253,7 +1255,7 @@ export const createPartner = async (req: Request, res: Response) => {
     websiteUrl: req.body.websiteUrl || '',
   };
   memoryStore.partners.push(newPartner);
-  persistStore();
+  await persistStore();
   res.status(201).json(newPartner);
 };
 
@@ -1275,7 +1277,7 @@ export const updatePartner = async (req: Request, res: Response) => {
   };
 
   memoryStore.partners[index] = next;
-  persistStore();
+  await persistStore();
 
   if (logo && logo.url !== previous.logo) {
     await releaseAsset({ url: previous.logo, publicId: previous.logoPublicId }, (url) =>
@@ -1290,7 +1292,7 @@ export const deletePartner = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.partners.find((p) => p.id === id);
   memoryStore.partners = memoryStore.partners.filter((p) => p.id !== id);
-  persistStore();
+  await persistStore();
   if (target) {
     await releaseAsset({ url: target.logo, publicId: target.logoPublicId }, (url) =>
       memoryStore.partners.some((partner) => partner.logo === url)
@@ -1337,7 +1339,7 @@ export const createCareer = async (req: Request, res: Response) => {
     createdAt: new Date().toISOString(),
   };
   memoryStore.careers.unshift(newCircular);
-  persistStore();
+  await persistStore();
   res.status(201).json(newCircular);
 };
 
@@ -1368,7 +1370,7 @@ export const updateCareer = async (req: Request, res: Response) => {
   };
 
   memoryStore.careers[index] = next;
-  persistStore();
+  await persistStore();
 
   if (pdf.asset && pdf.asset.url !== previous.pdfFile) {
     await releaseAsset({ url: previous.pdfFile, publicId: previous.pdfFilePublicId }, (url) =>
@@ -1383,7 +1385,7 @@ export const deleteCareer = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.careers.find((c) => c.id === id);
   memoryStore.careers = memoryStore.careers.filter((c) => c.id !== id);
-  persistStore();
+  await persistStore();
   if (target?.pdfFile) {
     await releaseAsset({ url: target.pdfFile, publicId: target.pdfFilePublicId }, (url) =>
       memoryStore.careers.some((circular) => circular.pdfFile === url)
@@ -1426,7 +1428,7 @@ export const applyJob = async (req: Request, res: Response) => {
   };
 
   memoryStore.applications.unshift(newApp);
-  persistStore();
+  await persistStore();
   res.status(201).json({ message: 'আপনার আবেদনপত্র সফলভাবে জমা হয়েছে। ধন্যবাদ!', application: newApp });
 };
 
@@ -1438,7 +1440,7 @@ export const deleteApplication = async (req: Request, res: Response) => {
   const { id } = req.params;
   const target = memoryStore.applications.find((a) => a.id === id);
   memoryStore.applications = memoryStore.applications.filter((a) => a.id !== id);
-  persistStore();
+  await persistStore();
   if (target?.cvFile) {
     await releaseAsset({ url: target.cvFile, publicId: target.cvPublicId }, (url) =>
       memoryStore.applications.some((application) => application.cvFile === url)
@@ -1453,7 +1455,7 @@ export const getStats = (req: Request, res: Response) => {
   res.json(stats);
 };
 
-export const createStat = (req: Request, res: Response) => {
+export const createStat = async (req: Request, res: Response) => {
   const newStat: StatItem = {
     id: 'st-' + Date.now(),
     label: req.body.label || 'নতুন পরিসংখ্যান',
@@ -1463,11 +1465,11 @@ export const createStat = (req: Request, res: Response) => {
     order: memoryStore.stats.length + 1,
   };
   memoryStore.stats.push(newStat);
-  persistStore();
+  await persistStore();
   res.status(201).json(newStat);
 };
 
-export const updateStat = (req: Request, res: Response) => {
+export const updateStat = async (req: Request, res: Response) => {
   const { id } = req.params;
   const index = memoryStore.stats.findIndex((s) => s.id === id);
   if (index === -1) return res.status(404).json({ error: 'Stat item not found' });
@@ -1479,14 +1481,14 @@ export const updateStat = (req: Request, res: Response) => {
     value: Number(req.body.value ?? memoryStore.stats[index].value),
     order: Number(req.body.order ?? memoryStore.stats[index].order),
   };
-  persistStore();
+  await persistStore();
   res.json(memoryStore.stats[index]);
 };
 
-export const deleteStat = (req: Request, res: Response) => {
+export const deleteStat = async (req: Request, res: Response) => {
   const { id } = req.params;
   memoryStore.stats = memoryStore.stats.filter((s) => s.id !== id);
-  persistStore();
+  await persistStore();
   res.json({ message: 'Stat item deleted' });
 };
 
@@ -1552,7 +1554,7 @@ export const updateSettings = async (req: Request, res: Response) => {
     ...memoryStore.settings,
     ...(updatedData as Partial<SiteSettings>),
   };
-  persistStore();
+  await persistStore();
 
   if (logo && previousLogo && previousLogo !== logo.url) {
     await releaseAsset({ url: previousLogo, publicId: previousLogoPublicId }, (url) =>
@@ -1578,6 +1580,6 @@ export const updatePageContent = async (req: Request, res: Response) => {
   };
 
   memoryStore.pageContent = next;
-  persistStore();
+  await persistStore();
   res.json(memoryStore.pageContent);
 };

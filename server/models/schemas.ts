@@ -17,136 +17,12 @@ import {
   PageContent,
 } from '../../src/types';
 
-// Mongoose Schemas
-const HeroSlideSchema = new Schema({
-  image: { type: String, required: true },
-  headline: { type: String, required: true },
-  subtext: { type: String, required: true },
-  buttonText: String,
-  buttonLink: String,
-  order: { type: Number, default: 0 },
-  isActive: { type: Boolean, default: true },
-});
-
-const ProgramSchema = new Schema({
-  title: { type: String, required: true },
-  slug: { type: String, required: true, unique: true },
-  icon: { type: String, required: true },
-  shortDesc: { type: String, required: true },
-  content: { type: String, required: true },
-  coverImage: { type: String, required: true },
-  status: { type: String, enum: ['ongoing', 'completed'], default: 'ongoing' },
-  order: { type: Number, default: 0 },
-  beneficiariesCount: Number,
-  districtsCovered: Number,
-});
-
-const NewsSchema = new Schema({
-  title: { type: String, required: true },
-  slug: { type: String, required: true, unique: true },
-  category: { type: String, enum: ['News', 'Event', 'Press Release', 'Impact Story'], required: true },
-  thumbnail: { type: String, required: true },
-  content: { type: String, required: true },
-  publishedAt: { type: Date, default: Date.now },
-  views: { type: Number, default: 0 },
-  author: String,
-});
-
-const VideoSchema = new Schema({
-  title: { type: String, required: true },
-  type: { type: String, enum: ['upload', 'embed'], required: true },
-  filePath: String,
-  thumbnail: { type: String, required: true },
-  embedUrl: String,
-  duration: String,
-  uploadedAt: { type: Date, default: Date.now },
-  category: String,
-});
-
-const NoticeSchema = new Schema({
-  title: { type: String, required: true },
-  pdfFile: { type: String, required: true },
-  publishedAt: { type: Date, default: Date.now },
-  expiryDate: Date,
-  isActive: { type: Boolean, default: true },
-  referenceNo: String,
-});
-
-const PublicationSchema = new Schema({
-  title: { type: String, required: true },
-  type: { type: String, enum: ['annual_report', 'newsletter', 'report'], required: true },
-  pdfFile: { type: String, required: true },
-  year: { type: Number, required: true },
-  thumbnail: String,
-});
-
-const GalleryAlbumSchema = new Schema({
-  title: { type: String, required: true, trim: true, maxlength: 120 },
-  // Albums may intentionally be created before their first photo is ready.
-  coverImage: { type: String, default: '' },
-  coverPublicId: String,
-  coverStorage: { type: String, enum: ['cloudinary', 'local'] },
-  description: { type: String, maxlength: 500 },
-  createdAt: { type: Date, default: Date.now },
-});
-
-const GalleryPhotoSchema = new Schema({
-  // Content currently uses stable `alb-*` ids in the persisted JSON store, not
-  // Mongo ObjectIds. Keeping the schema aligned prevents an invalid cast if
-  // gallery content is moved to these existing models in the future.
-  albumId: { type: String, required: true, index: true },
-  image: { type: String, required: true },
-  publicId: String,
-  storage: { type: String, enum: ['cloudinary', 'local'] },
-  caption: { type: String, maxlength: 300 },
-  uploadedAt: { type: Date, default: Date.now },
-});
-
-const CommitteeSchema = new Schema({
-  name: { type: String, required: true },
-  designation: { type: String, required: true },
-  type: { type: String, enum: ['general', 'executive', 'advisory', 'leadership'], required: true },
-  photo: { type: String, required: true },
-  bio: { type: String, required: true },
-  order: { type: Number, default: 0 },
-  email: String,
-  phone: String,
-});
-
-const PartnerSchema = new Schema({
-  name: { type: String, required: true },
-  logo: { type: String, required: true },
-  websiteUrl: String,
-});
-
-const CareerSchema = new Schema({
-  title: { type: String, required: true },
-  deadline: { type: Date, required: true },
-  description: { type: String, required: true },
-  location: { type: String, required: true },
-  vacancy: { type: Number, default: 1 },
-  pdfFile: String,
-  isActive: { type: Boolean, default: true },
-  createdAt: { type: Date, default: Date.now },
-});
-
-const ApplicationSchema = new Schema({
-  careerId: { type: Schema.Types.ObjectId, ref: 'Career', required: true },
-  name: { type: String, required: true },
-  email: { type: String, required: true },
-  phone: { type: String, required: true },
-  cvFile: { type: String, required: true },
-  notes: String,
-  submittedAt: { type: Date, default: Date.now },
-});
-
-const StatSchema = new Schema({
-  label: { type: String, required: true },
-  value: { type: Number, required: true },
-  suffix: String,
-  icon: String,
-  order: { type: Number, default: 0 },
-});
+/**
+ * Content models live in `server/services/contentStore.ts`, which stores every
+ * entity as a document in its own MongoDB collection through
+ * `server/config/contentDb.ts`. The only Mongoose model left here is `Admin`,
+ * because admin accounts need bcrypt hashing and an index on the email.
+ */
 
 /**
  * Admin accounts are the only entity that always lives in MongoDB - they are
@@ -164,68 +40,6 @@ const AdminSchema = new Schema(
   { timestamps: true }
 );
 
-const SiteSettingsSchema = new Schema({
-  ngoName: String,
-  ngoNameEn: String,
-  ngoTagline: String,
-  logoUrl: String,
-  address: String,
-  addressEn: String,
-  branchAddresses: Array,
-  phone: String,
-  emergencyHotline: String,
-  email: String,
-  officeHours: String,
-  officeHoursEn: String,
-  headerLocation: Object,
-  footerAbout: Object,
-  footerCopyright: Object,
-  mapLat: Number,
-  mapLng: Number,
-  registrationNumber: String,
-  establishedYear: Number,
-  socialLinks: Object,
-  theme: {
-    primary: String,
-    accent: String,
-  },
-});
-
-const PageContentSchema = new Schema({
-  home: Object,
-  about: Object,
-  updatedAt: { type: Date, default: Date.now },
-});
-
-/**
- * The whole editable site content (hero slides, programs, news, gallery
- * records, settings, page copy, …) is persisted as ONE document in MongoDB.
- * Hosts such as Render / Heroku wipe the local disk on every deploy, so a
- * JSON file on disk is not a safe place for it (see server/config/persistence.ts).
- */
-const SiteContentSchema = new Schema(
-  {
-    key: { type: String, required: true, unique: true, index: true },
-    version: { type: Number, default: 1 },
-    savedAt: { type: Date, default: Date.now },
-    store: { type: Schema.Types.Mixed, default: {} },
-  },
-  { minimize: false, strict: false }
-);
-
-export const MHeroSlide = mongoose.models.HeroSlide || mongoose.model('HeroSlide', HeroSlideSchema);
-export const MProgram = mongoose.models.Program || mongoose.model('Program', ProgramSchema);
-export const MNews = mongoose.models.News || mongoose.model('News', NewsSchema);
-export const MVideo = mongoose.models.Video || mongoose.model('Video', VideoSchema);
-export const MNotice = mongoose.models.Notice || mongoose.model('Notice', NoticeSchema);
-export const MPublication = mongoose.models.Publication || mongoose.model('Publication', PublicationSchema);
-export const MGalleryAlbum = mongoose.models.GalleryAlbum || mongoose.model('GalleryAlbum', GalleryAlbumSchema);
-export const MGalleryPhoto = mongoose.models.GalleryPhoto || mongoose.model('GalleryPhoto', GalleryPhotoSchema);
-export const MCommittee = mongoose.models.Committee || mongoose.model('Committee', CommitteeSchema);
-export const MPartner = mongoose.models.Partner || mongoose.model('Partner', PartnerSchema);
-export const MCareer = mongoose.models.Career || mongoose.model('Career', CareerSchema);
-export const MApplication = mongoose.models.Application || mongoose.model('Application', ApplicationSchema);
-export const MStat = mongoose.models.Stat || mongoose.model('Stat', StatSchema);
 export interface AdminDocument extends mongoose.Document {
   name: string;
   email: string;
@@ -240,21 +54,12 @@ export interface AdminDocument extends mongoose.Document {
 export const MAdmin: mongoose.Model<AdminDocument> =
   (mongoose.models.Admin as mongoose.Model<AdminDocument>) ||
   mongoose.model<AdminDocument>('Admin', AdminSchema);
-export const MSiteSettings = mongoose.models.SiteSettings || mongoose.model('SiteSettings', SiteSettingsSchema);
-export const MPageContent = mongoose.models.PageContent || mongoose.model('PageContent', PageContentSchema);
 
-export interface SiteContentDocument extends mongoose.Document {
-  key: string;
-  version: number;
-  savedAt: Date;
-  store: Record<string, unknown>;
-}
-
-export const MSiteContent: mongoose.Model<SiteContentDocument> =
-  (mongoose.models.SiteContent as mongoose.Model<SiteContentDocument>) ||
-  mongoose.model<SiteContentDocument>('SiteContent', SiteContentSchema);
-
-// In-Memory Fallback Memory Store Data
+// In-memory read cache for the site content.
+//
+// It is NOT a store: it is filled from MongoDB at boot (server/services/
+// contentStore.ts) and every change is written straight back to MongoDB. The
+// controllers read from it so serving a page never needs a database round trip.
 export const memoryStore = {
   heroSlides: [] as HeroSlide[],
   programs: [] as Program[],
