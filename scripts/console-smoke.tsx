@@ -84,7 +84,7 @@ const snapshot = {
     hint: 'disabled by operator',
     operatorDisabled: true,
     disabledAt: new Date().toISOString(),
-    target: 'cluster.mongodb.net',
+    ping: { ok: false, checkedAt: new Date().toISOString(), latencyMs: null, error: 'No active MongoDB connection in this process.' },
     reconnectLoop: 'active (20s)',
   },
   storage: {
@@ -158,7 +158,7 @@ const snapshot = {
   },
   audit: { inMemory: 3, databaseWrites: 3, databaseFailures: 0 },
   admins: { total: 2, active: 2 },
-  session: { passcodeFromEnvironment: false, passcodeLength: 10, throttle: { trackedIps: 1, lockedIps: 0 } },
+  session: { passcodeFromEnvironment: false, throttle: { trackedIps: 1, lockedIps: 0 } },
 };
 
 const auditEntry = {
@@ -194,6 +194,7 @@ const panels: [string, React.ReactElement][] = [
       snapshot: snapshot as never,
       audit: [auditEntry],
       loading: false,
+      sync: { intervalSeconds: 15, lastSuccessAt: Date.now(), error: null, syncing: false },
       onRefresh: noop,
       onToast: noop,
       onOpenAudit: noop,
@@ -208,7 +209,7 @@ const panels: [string, React.ReactElement][] = [
       onToast: noop,
     }),
   ],
-  ['Telemetry', React.createElement(TelemetryPanel, { snapshot: snapshot as never })],
+  ['Telemetry', React.createElement(TelemetryPanel, { snapshot: snapshot as never, loading: false, syncError: null })],
   [
     'Audit log',
     React.createElement(AuditPanel, {

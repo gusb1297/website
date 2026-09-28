@@ -114,6 +114,102 @@ export function getMongoLastError(): string | null {
   return lastError;
 }
 
+/* ── real health check ──────────────────────────────────────────────────── */
+
+export interface MongoPingResult {
+  /** True only when MongoDB answered the `ping` command right now. */
+  ok: boolean;
+  /** ISO timestamp of this check. */
+  checkedAt: string;
+  /** Round-trip time of the ping command in milliseconds (when ok). */
+  latencyMs: number | null;
+  /** Sanitized failure reason — never contains the URI or credentials. */
+  error: string | null;
+}
+
+let pingInFlight: Promise<MongoPingResult> | null = null;
+let lastPing: MongoPingResult | null = null;
+
+/**
+ * Server-side health check: run MongoDB's `ping` database command through the
+ * live driver connection. `readyState` alone only repeats what the driver last
+ * observed — the ping proves the server actually answers *now*, which is what
+ * the console shows as CONNECTED / DISCONNECTED.
+ *
+ * Never throws; the failure is returned as `{ ok: false, error }`.
+ */
+export function pingMongo(): Promise<MongoPingResult> {
+  if (pingInFlight) return pingInFlight;
+
+  // Very short result cache (2s) so a busy status endpoint cannot hammer the
+  // database with pings — the console's own poll interval is far longer.
+  if (lastPing && Date.now() - Date.parse(lastPing.checkedAt) < 2000) {
+    return Promise.resolve(lastPing);
+  }
+
+  const run = async (): Promise<MongoPingResult> => {
+    const started = Date.now();
+    const checkedAt = new Date().toISOString();
+
+    const db = mongoose.connection.db;
+    if (mongoose.connection.readyState !== 1 || !db) {
+      return {
+        ok: false,
+        checkedAt,
+        latencyMs: null,
+        error: lastError
+          ? sanitizeMongoError(lastError)
+          : 'No active MongoDB connection in this process.',
+      };
+    }
+
+    try {
+      const command = db.admin().command({ ping: 1 });
+      const timeout = new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error('MongoDB ping timed out after 4s')), 4000);
+      });
+      const result = (await Promise.race([command, timeout])) as { ok?: number };
+      const latencyMs = Date.now() - started;
+      if (result && result.ok === 1) {
+        lastError = null;
+        return { ok: true, checkedAt, latencyMs, error: null };
+      }
+      return {
+        ok: false,
+        checkedAt,
+        latencyMs,
+        error: 'The ping command did not return ok: 1.',
+      };
+    } catch (err) {
+      const message = sanitizePingError((err as Error)?.message || String(err));
+      lastError = message;
+      return { ok: false, checkedAt, latencyMs: Date.now() - started, error: message };
+    }
+  };
+
+  const promise = run();
+  pingInFlight = promise;
+  const release = () => {
+    if (pingInFlight === promise) pingInFlight = null;
+  };
+  promise.then(
+    (result) => {
+      lastPing = result;
+      release();
+    },
+    release
+  );
+  return promise;
+}
+
+/** Strip connection strings, userinfo and anything credential-like from an error. */
+function sanitizePingError(message: string): string {
+  return message
+    .replace(/mongodb(\+srv)?:\/\/\S+/gi, 'mongodb://***')
+    .replace(/\b([a-z][a-z0-9+.-]*):\/\/[^\s/@]+@[^\s]+/gi, '***://***@***')
+    .slice(0, 300);
+}
+
 /**
  * True when the URI already names a database (`...mongodb.net/mydb?...`).
  * Atlas "connect" strings sometimes omit it, in which case mongoose would

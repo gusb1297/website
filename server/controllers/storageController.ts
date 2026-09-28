@@ -12,7 +12,7 @@
  * retried, so the banner does not stay red after the problem went away.
  */
 import type { Request, Response } from 'express';
-import { describeMongoStatus, isDatabaseReady } from '../config/mongo';
+import { describeMongoStatus, isDatabaseReady, pingMongo } from '../config/mongo';
 import { describePersistenceStatus, healPersistence } from '../config/persistence';
 import { describeBackupStatus, listBackups } from '../services/backupService';
 import { memoryStore } from '../models/schemas';
@@ -45,15 +45,34 @@ function legacyLocalAssetCount(): number {
   return (text.match(/"\/uploads\//g) || []).length;
 }
 
-function statusPayload(backupCount?: number) {
+async function statusPayload(backupCount?: number) {
   const mongo = describeMongoStatus();
+  // Verified with a real `ping` command (throttled inside pingMongo) — the
+  // cached `readyState` flag alone is not proof that the server responds.
+  const ping = await pingMongo();
+  const mongoState =
+    mongo.state === 'disabled' || mongo.state === 'not_configured'
+      ? mongo.state
+      : ping.ok
+        ? 'connected'
+        : 'unreachable';
   const storage = describeStorageStatus();
   const content = describePersistenceStatus();
-  const backup = { ...describeBackupStatus(), count: backupCount ?? null };
+  const { mirror: mirrorStatus, ...backupRest } = describeBackupStatus();
+  const backup = {
+    ...backupRest,
+    count: backupCount ?? null,
+    // Same rule as the document gateway: the mirror is described by its
+    // provider + state on status endpoints; the raw host lives in the
+    // Gateways module only.
+    mirror: mirrorStatus
+      ? { enabled: mirrorStatus.enabled, provider: mirrorStatus.provider, lastError: mirrorStatus.lastError }
+      : null,
+  };
   return {
     status: 'ok' as const,
     time: new Date().toISOString(),
-    mongo: { configured: mongo.configured, connected: mongo.connected, state: mongo.state },
+    mongo: { configured: mongo.configured, connected: mongoState === 'connected', state: mongoState },
     storage: {
       provider: storage.provider,
       configured: storage.configured,
@@ -65,7 +84,12 @@ function statusPayload(backupCount?: number) {
       lastCheck: storage.lastCheck,
       missing: storage.missing,
       hint: storage.hint,
-      documents: storage.documents,
+      /**
+       * Document gateway: provider + state only. The gateway's raw host is
+       * managed (and shown) exclusively in the console's Gateways module —
+       * status surfaces never leak third-party endpoints.
+       */
+      documents: { provider: storage.documents.provider, configured: storage.documents.configured },
     },
     content: {
       source: content.source,
@@ -106,11 +130,11 @@ function cloudsUsedByContent(): { name: string; count: number }[] {
     .map(([name, count]) => ({ name, count }));
 }
 
-export function getHealth(_req: Request, res: Response) {
+export async function getHealth(_req: Request, res: Response) {
   refreshStorageStatusIfStale();
   healPersistence();
   res.setHeader('Cache-Control', 'no-store');
-  res.json(statusPayload());
+  res.json(await statusPayload());
 }
 
 export async function getStorageStatus(req: Request, res: Response) {
@@ -124,7 +148,7 @@ export async function getStorageStatus(req: Request, res: Response) {
   const backupCount = isDatabaseReady() ? (await listBackups(500)).length : null;
   res.setHeader('Cache-Control', 'no-store');
   res.json({
-    ...statusPayload(backupCount ?? undefined),
+    ...(await statusPayload(backupCount ?? undefined)),
     diagnostics: {
       cloudinary: describeStorageCredentials(),
       contentClouds: cloudsUsedByContent(),

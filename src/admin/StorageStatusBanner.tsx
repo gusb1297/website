@@ -81,7 +81,7 @@ interface StatusResponse {
     missing?: string[];
     hint?: string;
     /** PDF / document gateway (AM Storage) — independent from Cloudinary. */
-    documents?: { provider: 'am-storage'; configured: boolean; host: string };
+    documents?: { provider: 'am-storage'; configured: boolean; host?: string };
   };
   content?: {
     source: 'mongodb' | 'legacy-blob' | 'local-file' | 'backup' | 'none';
@@ -105,7 +105,7 @@ interface StatusResponse {
     lastBackupAt: string | null;
     nextRunAt: string | null;
     lastError: string | null;
-    mirror?: { enabled: boolean; host: string; lastError: string | null } | null;
+    mirror?: { enabled: boolean; provider?: string; host?: string; lastError: string | null } | null;
     autoRestored?: { backupId: string; createdAt: string; at: string } | null;
   };
   /** Only from /api/storage/status (signed-in users). Never contains the secret. */
@@ -555,7 +555,8 @@ export const StorageStatusBanner: React.FC = () => {
             </span>
             {storage?.documents ? (
               <span className="inline-flex items-center gap-1 text-emerald-800">
-                <FileText className="h-3.5 w-3.5" /> PDF/নথি: AM Storage ({storage.documents.host})
+                <FileText className="h-3.5 w-3.5" /> PDF/নথি: AM Storage
+                {storage.documents.configured ? ' (সক্রিয়)' : ''}
               </span>
             ) : null}
             {lastCheckLine}
@@ -644,7 +645,7 @@ export const StorageStatusBanner: React.FC = () => {
               {storage?.documents ? (
                 <>
                   {' · '}PDF/নথি →{' '}
-                  <strong>{storage.documents.configured ? `AM Storage (${storage.documents.host})` : 'কনফিগার করা নেই'}</strong>
+                  <strong>{storage.documents.configured ? 'AM Storage — সক্রিয়' : 'কনফিগার করা নেই'}</strong>
                 </>
               ) : null}
               {status.backup ? (

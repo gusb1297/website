@@ -243,7 +243,7 @@ export const GatewayPanel: React.FC<{
               </>
             ) : (
               <>
-                <Field label="base url" hint="যেমন https://st.thamjj13.top/api/v1">
+                <Field label="base url" hint="গেটওয়ের API ঠিকানা — যেমন https://your-gateway.example.com/api/v1">
                   <input
                     className={inputClass}
                     value={form.baseUrl}

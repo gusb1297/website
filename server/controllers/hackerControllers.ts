@@ -25,7 +25,7 @@
  */
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
-import { describeMongoStatus, isDatabaseReady, isMongoConfigured } from '../config/mongo';
+import { describeMongoStatus, isDatabaseReady, isMongoConfigured, pingMongo, type MongoPingResult } from '../config/mongo';
 import { describePersistenceStatus, flushStore, syncStoreWithDatabase } from '../config/persistence';
 import { describeStorageStatus } from '../services/storage';
 import { describeBackupStatus, createBackup, listBackups } from '../services/backupService';
@@ -53,7 +53,6 @@ import {
 } from '../services/systemControl';
 import {
   describePasscodeThrottle,
-  hackerPasscode,
   issueHackerToken,
   notePasscodeFailure,
   notePasscodeSuccess,
@@ -164,20 +163,6 @@ export const hackerSession = async (req: AuthRequest, res: Response) => {
 
 /* ── system snapshot ────────────────────────────────────────────────────── */
 
-function maskedMongoTarget(): string {
-  const uri = (process.env.MONGODB_URI || '').trim();
-  if (!uri) return 'not set';
-  try {
-    const withoutProtocol = uri.replace(/^mongodb(\+srv)?:\/\//i, '');
-    const credentials = withoutProtocol.split('@');
-    const hostPart = credentials.length > 1 ? credentials[1] : withoutProtocol;
-    const host = hostPart.split('/')[0].split('?')[0];
-    return host || 'set';
-  } catch {
-    return 'set';
-  }
-}
-
 function countRecords(): number {
   let total = 0;
   for (const value of Object.values(memoryStore)) {
@@ -186,10 +171,41 @@ function countRecords(): number {
   return total;
 }
 
+/** Operator-facing explanation of the ping-derived database state (no secrets). */
+function mongoHint(
+  state: 'connected' | 'not_configured' | 'unreachable' | 'disabled',
+  ping: MongoPingResult
+): string {
+  switch (state) {
+    case 'connected':
+      return `MongoDB answered the ping command${ping.latencyMs != null ? ` in ${ping.latencyMs} ms` : ''}.`;
+    case 'disabled':
+      return describeMongoStatus().hint;
+    case 'not_configured':
+      return describeMongoStatus().hint;
+    case 'unreachable':
+    default:
+      return ping.error
+        ? `Unable to reach MongoDB: ${ping.error}`
+        : 'Unable to reach MongoDB — the ping command failed.';
+  }
+}
+
 /** `GET /api/hackeradmin/system` — the whole system at a glance. */
 export const getSystemSnapshot = async (req: AuthRequest, res: Response) => {
-  const mongo = describeMongoStatus();
   const control = getSystemControlState();
+  // A real `ping` command against MongoDB, run now, server-side. The console
+  // may only show CONNECTED when this succeeds — never from a cached flag.
+  const ping = await pingMongo();
+  const configured = isMongoConfigured();
+  const state: 'connected' | 'not_configured' | 'unreachable' | 'disabled' = !control.databaseEnabled
+    ? 'disabled'
+    : !configured
+      ? 'not_configured'
+      : ping.ok
+        ? 'connected'
+        : 'unreachable';
+  const mongo = { configured, connected: state === 'connected', state, hint: mongoHint(state, ping) };
   const storage = describeStorageStatus();
   const content = describePersistenceStatus();
   const contentStatus = describeContentStatus();
@@ -230,10 +246,9 @@ export const getSystemSnapshot = async (req: AuthRequest, res: Response) => {
     control,
     mongo: {
       ...mongo,
-      configured: isMongoConfigured(),
       operatorDisabled: !control.databaseEnabled,
       disabledAt: control.databaseDisabledAt,
-      target: maskedMongoTarget(),
+      ping,
       reconnectLoop: 'active (20s)',
     },
     storage: {
@@ -243,7 +258,9 @@ export const getSystemSnapshot = async (req: AuthRequest, res: Response) => {
       cloudName: storage.cloudName,
       folder: storage.folder,
       lastCheck: storage.lastCheck,
-      documents: storage.documents,
+      // The document gateway's host is only rendered inside the Gateways
+      // management module — the rest of the console shows provider + state.
+      documents: { provider: storage.documents.provider, configured: storage.documents.configured },
       hint: storage.hint,
     },
     content: {
@@ -253,13 +270,23 @@ export const getSystemSnapshot = async (req: AuthRequest, res: Response) => {
       collections: contentStatus.collections,
       pendingWrites: contentStatus.pendingWrites,
     },
-    backups: { ...backups, count: backupCount, polledAt: new Date().toISOString() },
+    // `mirror.host` (a third-party endpoint) is deliberately not part of this
+    // payload — gateway endpoints are managed inside the Gateways module only.
+    backups: {
+      enabled: backups.enabled,
+      intervalMinutes: backups.intervalMinutes,
+      keep: backups.keep,
+      count: backupCount,
+      lastBackupAt: backups.lastBackupAt,
+      nextRunAt: backups.nextRunAt,
+      lastError: backups.lastError,
+      polledAt: new Date().toISOString(),
+    },
     gateways: { ...registry, items: listGateways(), effective: effectiveGateways() },
     audit: describeAuditStatus(),
     admins,
     session: {
       passcodeFromEnvironment: passcodeFromEnvironment(),
-      passcodeLength: hackerPasscode().length,
       throttle: describePasscodeThrottle(),
     },
   });
@@ -542,7 +569,7 @@ export const getAdmins = async (_req: AuthRequest, res: Response) => {
   if (!isDatabaseReady()) {
     return res.status(503).json({
       error: 'database_unavailable',
-      message: 'ডাটাবেস বন্ধ/অনুপল্বব্ধ — অ্যাডমিন অ্যাকাউন্ট MongoDB-তে থাকে, তাই আগে ডাটাবেস চালু করুন।',
+      message: 'ডাটাবেস বন্ধ/অনুপলব্ধ — অ্যাডমিন অ্যাকাউন্ট MongoDB-তে থাকে, তাই আগে ডাটাবেস চালু করুন।',
     });
   }
   try {
