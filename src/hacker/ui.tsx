@@ -1,24 +1,24 @@
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 
-/** Small building blocks shared by every console module (dark terminal look). */
+/** Shared interface elements for the professional operations console. */
 
 export type Tone = 'green' | 'cyan' | 'amber' | 'red' | 'muted';
 
 const TONE_TEXT: Record<Tone, string> = {
-  green: 'text-[color:var(--ha-green)]',
-  cyan: 'text-[color:var(--ha-cyan)]',
-  amber: 'text-[color:var(--ha-amber)]',
-  red: 'text-[color:var(--ha-red)]',
-  muted: 'text-[color:var(--ha-muted)]',
+  green: 'ha-tone-text-success',
+  cyan: 'ha-tone-text-info',
+  amber: 'ha-tone-text-warning',
+  red: 'ha-tone-text-danger',
+  muted: 'ha-tone-text-muted',
 };
 
-const TONE_BORDER: Record<Tone, string> = {
-  green: 'border-[color:var(--ha-line-strong)] bg-[rgba(57,255,158,0.08)]',
-  cyan: 'border-[rgba(55,224,255,0.4)] bg-[rgba(55,224,255,0.08)]',
-  amber: 'border-[rgba(255,181,69,0.4)] bg-[rgba(255,181,69,0.08)]',
-  red: 'border-[rgba(255,77,94,0.45)] bg-[rgba(255,77,94,0.1)]',
-  muted: 'border-[color:var(--ha-line)] bg-[rgba(255,255,255,0.02)]',
+const TONE_SURFACE: Record<Tone, string> = {
+  green: 'ha-tone-success',
+  cyan: 'ha-tone-info',
+  amber: 'ha-tone-warning',
+  red: 'ha-tone-danger',
+  muted: 'ha-tone-neutral',
 };
 
 export const Panel: React.FC<{
@@ -30,10 +30,10 @@ export const Panel: React.FC<{
 }> = ({ title, subtitle, actions, children, className = '' }) => (
   <section className={`ha-panel p-4 sm:p-5 ${className}`}>
     {title ? (
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <header className="ha-panel-header mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-[color:var(--ha-green)]">{title}</h2>
-          {subtitle ? <p className="mt-1 text-[11px] text-[color:var(--ha-muted)]">{subtitle}</p> : null}
+          <h2 className="ha-panel-title text-sm font-bold">{title}</h2>
+          {subtitle ? <p className="ha-panel-subtitle mt-1 text-[11px]">{subtitle}</p> : null}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </header>
@@ -46,11 +46,10 @@ export const Chip: React.FC<{ label: string; value: string; tone?: Tone; pulse?:
   label,
   value,
   tone = 'muted',
-  pulse,
 }) => (
-  <span className={`inline-flex items-center gap-2 border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] ${TONE_BORDER[tone]}`}>
-    <span className={`inline-block h-1.5 w-1.5 rounded-full ${pulse ? 'ha-dot-live' : ''}`} style={{ background: 'currentColor' }} />
-    <span className="text-[color:var(--ha-muted)]">{label}</span>
+  <span className={`ha-chip inline-flex items-center gap-2 border px-2.5 py-1 text-[10px] ${TONE_SURFACE[tone]}`}>
+    <span className="ha-chip-dot inline-block h-1.5 w-1.5 rounded-full" aria-hidden="true" />
+    <span className="ha-chip-label">{label}</span>
     <span className={`font-bold ${TONE_TEXT[tone]}`}>{value}</span>
   </span>
 );
@@ -61,7 +60,7 @@ export const Stat: React.FC<{ label: string; value: React.ReactNode; hint?: stri
   hint,
   tone = 'green',
 }) => (
-  <div className={`border px-3 py-2.5 ${TONE_BORDER[tone]}`}>
+  <div className={`ha-stat border px-3 py-2.5 ${TONE_SURFACE[tone]}`}>
     <p className="ha-label">{label}</p>
     <p className={`mt-1 truncate text-lg font-bold ${TONE_TEXT[tone]}`}>{value}</p>
     {hint ? <p className="mt-0.5 truncate text-[10px] text-[color:var(--ha-muted)]">{hint}</p> : null}
@@ -69,8 +68,8 @@ export const Stat: React.FC<{ label: string; value: React.ReactNode; hint?: stri
 );
 
 export const Row: React.FC<{ label: string; value: React.ReactNode; tone?: Tone }> = ({ label, value, tone = 'green' }) => (
-  <div className="flex items-baseline justify-between gap-3 border-b border-[color:var(--ha-line)] py-2 last:border-0">
-    <span className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--ha-muted)]">{label}</span>
+  <div className="ha-row flex items-baseline justify-between gap-3 border-b py-2 last:border-0">
+    <span className="ha-row-label text-[10px]">{label}</span>
     <span className={`truncate text-right text-xs font-semibold ${TONE_TEXT[tone]}`}>{value}</span>
   </div>
 );
@@ -90,17 +89,14 @@ export const Button: React.FC<{
     title={title}
     onClick={onClick}
     disabled={disabled || busy}
-    className={`inline-flex items-center justify-center gap-2 border px-3 py-2 text-[11px] font-bold uppercase tracking-[0.16em] transition disabled:cursor-not-allowed disabled:opacity-45 ${TONE_BORDER[tone]} ${TONE_TEXT[tone]} hover:brightness-125 ${className}`}
+    className={`ha-button inline-flex items-center justify-center gap-2 border px-3 py-2 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${TONE_SURFACE[tone]} ${TONE_TEXT[tone]} ${className}`}
   >
     {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
     {children}
   </button>
 );
 
-/**
- * A big physical-feeling switch. Used for the two operator toggles (database and
- * write freeze) where the state must be readable at a glance.
- */
+/** A clear, accessible switch for high-impact operator controls. */
 export const PowerSwitch: React.FC<{
   label: string;
   description: string;
@@ -113,36 +109,29 @@ export const PowerSwitch: React.FC<{
 }> = ({ label, description, on, busy, onText, offText, danger, onToggle }) => {
   const activeTone = on ? (danger ? 'red' : 'green') : 'muted';
   return (
-    <div className={`border p-4 ${TONE_BORDER[activeTone]}`}>
+    <div className={`ha-switch-card border p-4 ${TONE_SURFACE[activeTone]}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[color:var(--ha-text)]">{label}</p>
-          <p className="mt-1 max-w-md text-[11px] leading-relaxed text-[color:var(--ha-muted)]">{description}</p>
+          <p className="ha-switch-title text-xs font-bold">{label}</p>
+          <p className="ha-switch-description mt-1 max-w-md text-[11px] leading-relaxed">{description}</p>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`text-xs font-bold uppercase tracking-[0.2em] ${TONE_TEXT[activeTone]}`}>
+          <span className={`ha-switch-state text-xs font-bold ${TONE_TEXT[activeTone]}`}>
             {on ? onText : offText}
           </span>
           <button
             type="button"
             role="switch"
             aria-checked={on}
+            aria-label={`${label}: ${on ? onText : offText}`}
             disabled={busy}
             onClick={() => onToggle(!on)}
-            className={`relative h-8 w-16 shrink-0 border transition disabled:opacity-50 ${
-              on
-                ? danger
-                  ? 'border-[rgba(255,77,94,0.6)] bg-[rgba(255,77,94,0.22)]'
-                  : 'border-[color:var(--ha-green)] bg-[rgba(57,255,158,0.22)]'
-                : 'border-[color:var(--ha-line)] bg-[rgba(255,255,255,0.04)]'
+            className={`ha-switch relative h-7 w-12 shrink-0 border transition disabled:opacity-50 ${
+              on ? (danger ? 'is-on is-danger' : 'is-on') : ''
             }`}
           >
-            <span
-              className={`absolute top-1 h-6 w-6 transition-all ${
-                on ? 'left-9' : 'left-1'
-              } ${on ? (danger ? 'bg-[color:var(--ha-red)]' : 'bg-[color:var(--ha-green)]') : 'bg-[color:var(--ha-muted)]'}`}
-            />
-            {busy ? <Loader2 className="absolute inset-0 m-auto h-4 w-4 animate-spin text-white" /> : null}
+            <span className={`ha-switch-thumb absolute top-0.5 h-5 w-5 transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+            {busy ? <Loader2 className="absolute inset-0 m-auto h-4 w-4 animate-spin" /> : null}
           </button>
         </div>
       </div>
@@ -156,16 +145,15 @@ export const Field: React.FC<{
   hint?: string;
   className?: string;
 }> = ({ label, children, hint, className = '' }) => (
-  <label className={`block ${className}`}>
-    <span className="ha-label mb-1 block">{label}</span>
+  <label className={`ha-field block ${className}`}>
+    <span className="ha-field-label mb-1.5 block">{label}</span>
     {children}
-    {hint ? <span className="mt-1 block text-[10px] text-[color:var(--ha-muted)]">{hint}</span> : null}
+    {hint ? <span className="ha-field-hint mt-1 block text-[10px]">{hint}</span> : null}
   </label>
 );
 
-export const inputClass =
-  'w-full border border-[color:var(--ha-line)] bg-[rgba(4,10,8,0.85)] px-3 py-2 text-xs text-[color:var(--ha-text)] outline-none transition placeholder:text-[color:var(--ha-muted)] focus:border-[color:var(--ha-green)]';
+export const inputClass = 'ha-control w-full border px-3 py-2 text-xs outline-none transition placeholder:text-[color:var(--ha-muted)]';
 
 export const Notice: React.FC<{ tone?: Tone; children: React.ReactNode }> = ({ tone = 'muted', children }) => (
-  <div className={`border px-3 py-2 text-[11px] leading-relaxed ${TONE_BORDER[tone]}`}>{children}</div>
+  <div className={`ha-notice border px-3 py-2 text-[11px] leading-relaxed ${TONE_SURFACE[tone]}`}>{children}</div>
 );

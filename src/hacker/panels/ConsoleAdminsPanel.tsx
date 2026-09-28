@@ -139,7 +139,7 @@ export const ConsoleAdminsPanel: React.FC<{
         ) : null}
         {error ? <Notice tone="red">{error}</Notice> : null}
 
-        <form onSubmit={create} className="mt-4 grid gap-3 border border-[color:var(--ha-line)] bg-[rgba(255,255,255,0.02)] p-4 sm:grid-cols-2">
+        <form onSubmit={create} className="mt-4 grid gap-3 border border-[color:var(--ha-line)] bg-slate-50 p-4 sm:grid-cols-2">
           <Field label="full name">
             <input className={inputClass} value={name} onChange={(event) => setName(event.target.value)} required placeholder="Mohi" />
           </Field>

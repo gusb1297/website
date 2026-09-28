@@ -103,7 +103,7 @@ export const TelemetryPanel: React.FC<{ snapshot: SystemSnapshot | null }> = ({ 
       >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
           {content.collections.map((collection) => (
-            <div key={collection} className="border border-[color:var(--ha-line)] bg-[rgba(255,255,255,0.02)] px-3 py-2">
+            <div key={collection} className="border border-[color:var(--ha-line)] bg-slate-50 px-3 py-2">
               <p className="ha-label truncate">{collection}</p>
               <p className="mt-1 flex items-center gap-2 text-sm font-bold text-[color:var(--ha-green)]">
                 <HardDrive className="h-3.5 w-3.5" />
@@ -125,7 +125,7 @@ export const TelemetryPanel: React.FC<{ snapshot: SystemSnapshot | null }> = ({ 
             <Row label="throttled ips" value={`${session.throttle.trackedIps} tracked · ${session.throttle.lockedIps} locked`} tone={session.throttle.lockedIps ? 'amber' : 'green'} />
             <Row label="audit writes" value={`${audit.databaseWrites} stored · ${audit.databaseFailures} failed`} tone={audit.databaseFailures ? 'amber' : 'green'} />
           </div>
-          <div className="border border-[color:var(--ha-line)] bg-[rgba(255,255,255,0.02)] p-3 text-[11px] leading-relaxed text-[color:var(--ha-muted)]">
+          <div className="border border-[color:var(--ha-line)] bg-slate-50 p-3 text-[11px] leading-relaxed text-[color:var(--ha-muted)]">
             <p className="flex items-center gap-2 text-[color:var(--ha-green)]">
               <Activity className="h-3.5 w-3.5" /> {gateways.items.filter((item) => item.active).length} gateway(s) actively routing uploads
             </p>

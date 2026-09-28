@@ -30,7 +30,7 @@ import { HackerConsole } from './hacker/HackerConsole';
  * Layout wrapper: the public Navbar & Footer are only rendered on public
  * routes. Admin routes (/admin/*) and the operations console (/hackeradmin/*)
  * get a fully independent chrome so neither panel is wrapped in the public site
- * header/footer — and the console keeps its own dark terminal surface.
+ * header/footer — the console uses its own professional navy administration UI.
  */
 const AppShell: React.FC = () => {
   const location = useLocation();
@@ -42,7 +42,7 @@ const AppShell: React.FC = () => {
     <div
       className={
         isConsoleRoute
-          ? 'relative flex min-h-screen w-full max-w-full flex-col overflow-x-hidden bg-[#04070a]'
+          ? 'relative flex min-h-screen w-full max-w-full flex-col overflow-x-hidden bg-[#F3F6FA] font-sans text-slate-800 antialiased selection:bg-[#DCE7F3] selection:text-[#102B4C]'
           : 'relative flex min-h-screen w-full max-w-full flex-col overflow-x-hidden bg-[#F8F5F0] font-sans text-slate-800 antialiased selection:bg-[color:var(--site-accent)] selection:text-white'
       }
     >
