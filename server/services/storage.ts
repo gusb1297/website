@@ -57,6 +57,10 @@ import {
   isAmStorageConfigured,
   uploadDocumentToAmStorage,
 } from './amStorage';
+import {
+  isMediaGatewayDisabledByOperator,
+  managedMediaGateway,
+} from './gatewayRegistry';
 
 /**
  * Documents are not Cloudinary assets, yet every record keeps a single
@@ -96,6 +100,9 @@ export class StorageError extends Error {
  * reflects the environment the process runs with.
  */
 function cloudFolder(): string {
+  // A gateway managed from /hackeradmin carries its own folder.
+  const managed = managedMediaGateway();
+  if (managed?.folder) return managed.folder.trim().replace(/^\/+|\/+$/g, '');
   return (process.env.CLOUDINARY_FOLDER || 'vdo_bogura').trim().replace(/^\/+|\/+$/g, '');
 }
 
@@ -132,8 +139,53 @@ const NOTICE_LOG_TEXT: Record<string, string> = {
  * Explicit values override whatever the SDK parsed from CLOUDINARY_URL; other
  * URL options (private CDN, upload prefix …) are kept.
  */
+/**
+ * Credentials of the Cloudinary gateway the /hackeradmin console decided on.
+ *
+ * Returns null when the console has no opinion (registry not loaded → the
+ * environment is used exactly as before). When the operator switched the media
+ * gateway off, `complete: false` is returned so the panel reports
+ * "not configured" instead of uploading to a provider that was turned off.
+ */
+function managedCredentials(): CloudinaryCredentials | null {
+  const managed = managedMediaGateway();
+  if (managed) {
+    const complete = Boolean(managed.cloudName && managed.apiKey && managed.apiSecret);
+    return {
+      cloudName: managed.cloudName,
+      apiKey: managed.apiKey,
+      apiSecret: managed.apiSecret,
+      complete,
+      sources: { cloudName: managed.name, apiKey: managed.name, apiSecret: managed.name },
+      missing: complete ? [] : ['cloudName', 'apiKey', 'apiSecret'],
+      notices: [],
+    };
+  }
+  if (isMediaGatewayDisabledByOperator()) {
+    return {
+      cloudName: '',
+      apiKey: '',
+      apiSecret: '',
+      complete: false,
+      sources: { cloudName: null, apiKey: null, apiSecret: null },
+      missing: ['cloudName', 'apiKey', 'apiSecret'],
+      notices: [
+        {
+          variable: 'Cloudinary gateway',
+          kind: 'gateway_disabled',
+          severity: 'warn',
+          message:
+            'Cloudinary গেটওয়ে /hackeradmin কনসোল থেকে বন্ধ করা আছে — Gateways মডিউল থেকে আবার চালু না করা পর্যন্ত ছবি/ভিডিও আপলোড বন্ধ থাকবে।',
+        },
+      ],
+    };
+  }
+  return null;
+}
+
 function currentCredentials(): CloudinaryCredentials {
-  const creds = readCloudinaryCredentials();
+  const managed = managedCredentials();
+  const creds = managed || readCloudinaryCredentials();
   if (!creds.complete) return creds;
   const fingerprint = fingerprintOf(creds);
   if (fingerprint !== appliedFingerprint) {

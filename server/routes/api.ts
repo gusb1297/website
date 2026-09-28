@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { receiveUpload, rejectMultipart, limitsForClient } from '../middleware/upload';
-import { authenticateJwt, requireAdmin } from '../middleware/auth';
+import { authenticateJwt, maintenanceGate, requireAdmin, requireHackerAdmin } from '../middleware/auth';
 import { createRateLimit } from '../middleware/rateLimit';
 import { asyncHandler } from '../utils/asyncHandler';
 import { discardAsset, respondWithAsset } from '../controllers/uploadController';
@@ -9,6 +9,11 @@ import { getStorageStatus } from '../controllers/storageController';
 const loginRateLimiter = createRateLimit(20, 15 * 60 * 1000);
 /** Anonymous visitors may only upload a CV, and only a handful of times. */
 const publicUploadRateLimiter = createRateLimit(12, 30 * 60 * 1000);
+/**
+ * The /hackeradmin passcode gate: far stricter than a normal login (the console
+ * can switch the database off), on top of the per-IP lockout in hackerAuth.ts.
+ */
+const consoleLoginRateLimiter = createRateLimit(8, 10 * 60 * 1000);
 
 import {
   login,
@@ -78,6 +83,26 @@ import {
 } from '../controllers/ngoControllers';
 import { getAdmins, postAdmin, putAdmin, removeAdmin } from '../controllers/adminControllers';
 import {
+  getAdmins as getConsoleAdmins,
+  getAuditLog,
+  getGateways,
+  getSystemSnapshot,
+  hackerLogin,
+  hackerSession,
+  postAdmin as postConsoleAdmin,
+  postBackupNow,
+  postContentFlush,
+  postContentReload,
+  postDatabaseSwitch,
+  postGateway,
+  postMaintenanceSwitch,
+  putGateway,
+  removeAdmin as removeConsoleAdmin,
+  removeGateway,
+  restoreGateways,
+  testGatewayHandler,
+} from '../controllers/hackerControllers';
+import {
   createBackupHandler,
   deleteBackupHandler,
   downloadBackupHandler,
@@ -87,6 +112,13 @@ import {
 } from '../controllers/backupController';
 
 const router = Router();
+
+/**
+ * Write freeze (`maintenanceMode`, toggled from /hackeradmin → System Control).
+ * Read requests always pass; a write is refused while the freeze is on, except
+ * from the console itself and the login endpoints.
+ */
+router.use(maintenanceGate);
 
 /* ---------------------------------------------------------------------------
  * FILE UPLOADS — the single door every media file goes through.
@@ -115,6 +147,42 @@ router.post('/uploads/discard', authenticateJwt, asyncHandler(discardAsset));
 
 // Cloudinary / MongoDB status for the admin banner (`?verify=1` = check again now).
 router.get('/storage/status', authenticateJwt, asyncHandler(getStorageStatus));
+
+/* ---------------------------------------------------------------------------
+ * /hackeradmin — the operations console.
+ *
+ *   POST /login           passcode gate (rate-limited + audited)
+ *   everything below      requires a console session (passcode token)
+ *
+ * This is the only place that can switch the database off/on, freeze public
+ * writes, and add/remove storage gateways without a redeploy. The console token
+ * is deliberately not checked against MongoDB (see middleware/auth.ts), so the
+ * operator can always switch the database back on.
+ * ------------------------------------------------------------------------- */
+router.post('/hackeradmin/login', consoleLoginRateLimiter, asyncHandler(hackerLogin));
+router.get('/hackeradmin/session', authenticateJwt, requireHackerAdmin, asyncHandler(hackerSession));
+router.get('/hackeradmin/system', authenticateJwt, requireHackerAdmin, asyncHandler(getSystemSnapshot));
+router.post('/hackeradmin/database', authenticateJwt, requireHackerAdmin, asyncHandler(postDatabaseSwitch));
+router.post('/hackeradmin/maintenance', authenticateJwt, requireHackerAdmin, asyncHandler(postMaintenanceSwitch));
+
+// Storage gateways (documents / media / custom endpoints)
+router.get('/hackeradmin/gateways', authenticateJwt, requireHackerAdmin, asyncHandler(getGateways));
+router.post('/hackeradmin/gateways', authenticateJwt, requireHackerAdmin, asyncHandler(postGateway));
+router.post('/hackeradmin/gateways/restore-defaults', authenticateJwt, requireHackerAdmin, asyncHandler(restoreGateways));
+router.put('/hackeradmin/gateways/:id', authenticateJwt, requireHackerAdmin, asyncHandler(putGateway));
+router.delete('/hackeradmin/gateways/:id', authenticateJwt, requireHackerAdmin, asyncHandler(removeGateway));
+router.post('/hackeradmin/gateways/:id/test', authenticateJwt, requireHackerAdmin, asyncHandler(testGatewayHandler));
+
+// Audit trail + content operations
+router.get('/hackeradmin/audit', authenticateJwt, requireHackerAdmin, asyncHandler(getAuditLog));
+router.post('/hackeradmin/content/flush', authenticateJwt, requireHackerAdmin, asyncHandler(postContentFlush));
+router.post('/hackeradmin/content/reload', authenticateJwt, requireHackerAdmin, asyncHandler(postContentReload));
+router.post('/hackeradmin/content/backup', authenticateJwt, requireHackerAdmin, asyncHandler(postBackupNow));
+
+// Admin accounts (add / remove) from the console
+router.get('/hackeradmin/admins', authenticateJwt, requireHackerAdmin, asyncHandler(getConsoleAdmins));
+router.post('/hackeradmin/admins', authenticateJwt, requireHackerAdmin, asyncHandler(postConsoleAdmin));
+router.delete('/hackeradmin/admins/:id', authenticateJwt, requireHackerAdmin, asyncHandler(removeConsoleAdmin));
 
 /* ---------------------------------------------------------------------------
  * All content endpoints below are JSON-only now: the media file has already

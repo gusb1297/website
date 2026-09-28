@@ -12,7 +12,8 @@
     "create-admin": "tsx scripts/create-admin.ts",
     "test:content": "tsx scripts/smoke-test.ts",
     "test:e2e": "tsx scripts/e2e-test.ts",
-    "check": "tsx scripts/run-check.ts"
+    "check": "tsx scripts/run-check.ts",
+    "test:console": "tsx scripts/console-smoke.tsx"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

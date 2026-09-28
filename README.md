@@ -326,6 +326,91 @@ account revokes its session immediately, because every request re-validates the 
 > Without a reachable `MONGODB_URI` the admin panel cannot be used — login fails closed instead of
 > falling back to any hard-coded credential.
 
+## 🛰️ /hackeradmin — the operations console
+
+`/hackeradmin` is a **separate, passcode-only control surface** for whoever runs the platform. It is
+deliberately not part of `/admin`: it can switch the database off, take gateways out of service and
+create the very accounts that sign into `/admin`.
+
+```
+/hackeradmin            passcode gate  ("Restricted · Operations" → "Control Panel Access")
+/hackeradmin/console    the console itself (dark terminal surface)
+```
+
+### Opening it
+
+* One field, one passcode. The default passcode is `Mohi@99221`; set `HACKER_ADMIN_PASSCODE` to
+  replace it (recommended in production).
+* Guesses are throttled per IP (5s → 30s → 2m → 5m) on top of a hard rate limit of 8 attempts per
+  10 minutes, and **every attempt — success or failure — is written to the audit log**.
+* The passcode is compared in constant time and is never echoed back, logged or put in a URL.
+* The session it issues lasts 12 hours and is stored under its own browser key, so the console and an
+  ordinary `/admin` login can be open side by side without disturbing each other.
+
+### What it can do
+
+| Module | What it controls |
+| --- | --- |
+| **00 Control Room** | Database switch, public write freeze, flush/reload/snapshot, live telemetry, audit tail |
+| **01 Gateways** | Add / edit / test / enable / disable / delete storage gateways, restore environment defaults |
+| **02 Admin Accounts** | Create, disable and delete `/admin` logins (bcrypt-hashed, last active admin protected) |
+| **03 Audit Log** | Every privileged action with actor, target, level, IP and time |
+| **04 Telemetry** | Process, MongoDB, Cloudinary, document gateway, per-collection counts, snapshots |
+| **10–1D** | All the content modules (`/admin`'s modules, on the dark console surface) + backups/restore |
+
+### The database switch
+
+Turning **Database OFF** drops the MongoDB connection on purpose:
+
+* the public site keeps serving the in-memory snapshot, so visitors notice nothing;
+* every write is refused with **503** — nothing is silently lost, nothing is deleted;
+* normal `/admin` sessions stop working (they are re-validated against MongoDB), **but the console
+  keeps working**, because a console token is never re-validated against the database. That is what
+  makes the switch reversible even in a worst-case situation;
+* turning it back **ON** reconnects and re-syncs the content automatically. The state is stored in the
+  `systemcontrol` collection, so it also survives a restart.
+
+### The write freeze
+
+**Public Write Freeze** refuses every state-changing request (job applications, CV uploads, admin
+edits) with `503 maintenance_mode`, while read traffic and the console itself keep working. Login
+endpoints stay open so nobody can lock themselves out.
+
+### Gateways
+
+Gateways live in the `storagegateways` collection and are cached in memory, so the console can add,
+replace, disable or delete them without a redeploy:
+
+* `am-storage` — documents/PDF (multipart bridge, `dual` or `hmac` auth)
+* `cloudinary` — images/videos (cloud name + API key/secret + upload folder)
+* `external` — any other HTTP endpoint that accepts the same multipart contract
+
+The **enabled + primary** record of each kind is what uploads actually use; a kind with no enabled
+record is *switched off* (uploads are refused with a clear message and the admin banner says so).
+Secrets are never returned to the browser — the API only answers with a masked preview
+(`ng_live_x…5Js`). While the registry has not been loaded (MongoDB off), the environment credentials
+keep working as before, so a registry problem can never break uploads.
+
+### API
+
+All console endpoints live under `/api/hackeradmin` and require a console token:
+
+```
+POST   /api/hackeradmin/login                  passcode → token (rate-limited + audited)
+GET    /api/hackeradmin/session | /system      session / full system snapshot
+POST   /api/hackeradmin/database               { enabled: boolean }
+POST   /api/hackeradmin/maintenance            { enabled: boolean, note? }
+GET    /api/hackeradmin/gateways               list (+ what is really routing uploads)
+POST   /api/hackeradmin/gateways               add a gateway
+PUT    /api/hackeradmin/gateways/:id           edit / enable / make primary
+DELETE /api/hackeradmin/gateways/:id           delete a gateway
+POST   /api/hackeradmin/gateways/:id/test      connectivity + credential probe
+POST   /api/hackeradmin/gateways/restore-defaults
+GET    /api/hackeradmin/audit                  audit trail
+POST   /api/hackeradmin/content/flush|reload|backup
+GET    /api/hackeradmin/admins                 create/list/delete admin accounts
+```
+
 ##  Production build
 
 ```bash
@@ -360,13 +445,18 @@ server/
                  persistence.ts — the façade controllers call (`persistStore()` → 503 on failure)
   controllers/   all API handlers (CRUD + auth + settings + page-content + backups)
                  uploadController.ts — returns the Cloudinary asset / discards an orphan
-  middleware/    auth (JWT), rate limiting, upload.ts (multer → Cloudinary, JSON-only guard)
+  middleware/    auth (JWT + /hackeradmin console tokens + the write-freeze gate),
+                 rate limiting, upload.ts (multer → Cloudinary, JSON-only guard)
   models/        schemas.ts — Admin model + the in-memory content cache
   services/      contentStore.ts  the content repository: load, diff-write, migrate, restore
                  backupService.ts automatic snapshots (MongoDB + AM Storage) & auto-recovery
                  adminService     MongoDB CRUD + bootstrap + first-run setup
                  storage.ts       the ONE place files are written (Cloudinary, no fallback)
                  amStorage.ts     PDF/document gateway bridge
+                 gatewayRegistry.ts storage gateways managed from /hackeradmin (CRUD + probe)
+                 systemControl.ts operator switches: database on/off, public write freeze
+                 hackerAuth.ts    /hackeradmin passcode sessions (constant-time + lockout)
+                 auditLog.ts      audit trail of every privileged action (DB + memory ring)
   utils/         assets.ts (asset refs in JSON bodies + release-on-replace/delete)
   routes/api.ts  all /api routes
 scripts/
@@ -377,6 +467,9 @@ scripts/
   lib/memoryMongo.ts  the in-memory MongoDB substitute used by the tests
 src/
   admin/         admin dashboard + per-module managers
+  hacker/        /hackeradmin: the passcode gate + the dark operations console
+                 (Control Room, Gateways, Admin Accounts, Audit Log, Telemetry and the
+                 same content modules, re-painted by the .ha-dark scope in index.css)
   components/    Navbar, Footer, HeroSlider, StatsCounter, cards, map, video, PDF
                  admin/AssetField.tsx      single-file picker (upload on pick + preview)
                  admin/AssetBatchField.tsx multi-image picker for the gallery

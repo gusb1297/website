@@ -23,19 +23,30 @@ import { Contact } from './pages/Contact';
 
 import { AdminLogin } from './admin/AdminLogin';
 import { Dashboard } from './admin/Dashboard';
+import { HackerAdminLogin } from './hacker/HackerAdminLogin';
+import { HackerConsole } from './hacker/HackerConsole';
 
 /**
  * Layout wrapper: the public Navbar & Footer are only rendered on public
- * routes. Admin routes (/admin/*) get a fully independent chrome so the
- * management panel is not wrapped in the public site header/footer.
+ * routes. Admin routes (/admin/*) and the operations console (/hackeradmin/*)
+ * get a fully independent chrome so neither panel is wrapped in the public site
+ * header/footer — and the console keeps its own dark terminal surface.
  */
 const AppShell: React.FC = () => {
   const location = useLocation();
   const isAdminRoute = location.pathname.startsWith('/admin');
+  const isConsoleRoute = location.pathname.startsWith('/hackeradmin');
+  const isPanelRoute = isAdminRoute || isConsoleRoute;
 
   return (
-    <div className="flex flex-col min-h-screen w-full max-w-full overflow-x-hidden bg-[#F8F5F0] text-slate-800 font-sans antialiased selection:bg-[color:var(--site-accent)] selection:text-white relative">
-      {!isAdminRoute && <Navbar />}
+    <div
+      className={
+        isConsoleRoute
+          ? 'relative flex min-h-screen w-full max-w-full flex-col overflow-x-hidden bg-[#04070a]'
+          : 'relative flex min-h-screen w-full max-w-full flex-col overflow-x-hidden bg-[#F8F5F0] font-sans text-slate-800 antialiased selection:bg-[color:var(--site-accent)] selection:text-white'
+      }
+    >
+      {!isPanelRoute && <Navbar />}
 
       <main className="flex-1 w-full max-w-full overflow-x-hidden">
         <Routes>
@@ -57,12 +68,16 @@ const AppShell: React.FC = () => {
           <Route path="/admin/dashboard" element={<Dashboard />} />
           <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
 
+          {/* /hackeradmin — operations console (passcode gate, own dark chrome) */}
+          <Route path="/hackeradmin" element={<HackerAdminLogin />} />
+          <Route path="/hackeradmin/console" element={<HackerConsole />} />
+
           {/* Fallback Catch-all */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
 
-      {!isAdminRoute && <Footer />}
+      {!isPanelRoute && <Footer />}
     </div>
   );
 };

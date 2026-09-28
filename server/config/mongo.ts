@@ -12,7 +12,21 @@ import mongoose from 'mongoose';
 let lastError: string | null = null;
 let connecting: Promise<boolean> | null = null;
 
-export type MongoState = 'connected' | 'not_configured' | 'unreachable';
+/**
+ * Operator switch (the /hackeradmin console's "database" control).
+ *
+ * When an operator turns the database OFF, the whole app must behave exactly as
+ * if MongoDB were unreachable: reads keep coming from the in-memory snapshot the
+ * site is already serving, writes are refused, and admin sessions are frozen.
+ * The switch is held in module state (so it applies instantly and even while
+ * MongoDB is down) and mirrored into MongoDB by services/systemControl.ts so it
+ * survives a restart.
+ */
+let operatorDisabled = false;
+/** Moment the switch was flipped (ISO), for the console readout. */
+let operatorDisabledAt: string | null = null;
+
+export type MongoState = 'connected' | 'not_configured' | 'unreachable' | 'disabled';
 
 export interface MongoStatus {
   configured: boolean;
@@ -50,7 +64,50 @@ export function setDatabaseReadyOverride(override: (() => boolean) | null): void
 }
 
 export function isDatabaseReady(): boolean {
+  if (operatorDisabled) return false;
   return readyOverride ? readyOverride() : mongoose.connection.readyState === 1;
+}
+
+/** True when an operator switched the database off from /hackeradmin. */
+export function isDatabaseOperatorDisabled(): boolean {
+  return operatorDisabled;
+}
+
+export function databaseDisabledAt(): string | null {
+  return operatorDisabledAt;
+}
+
+/**
+ * Flip the operator switch without touching the connection (used at boot, right
+ * after the persisted value is read).
+ */
+export function noteDatabaseOperatorSwitch(disabled: boolean): void {
+  operatorDisabled = disabled;
+  operatorDisabledAt = disabled ? new Date().toISOString() : null;
+}
+
+/**
+ * Turn the database off: the connection is dropped so nothing can be written
+ * behind the operator's back. Serving continues from the in-memory snapshot.
+ */
+export async function disableDatabase(): Promise<void> {
+  operatorDisabled = true;
+  operatorDisabledAt = new Date().toISOString();
+  try {
+    await mongoose.disconnect();
+    console.warn('[mongo] Database turned OFF by the operator — content is served from memory and writes are refused.');
+  } catch (err) {
+    console.warn('[mongo] Disconnect while switching the database off failed:', (err as Error).message);
+  }
+}
+
+/** Turn the database back on and reconnect immediately. */
+export async function enableDatabase(): Promise<boolean> {
+  operatorDisabled = false;
+  operatorDisabledAt = null;
+  const ok = await connectMongo();
+  console.log(`[mongo] Database turned ON by the operator — ${ok ? 'connected' : 'NOT reachable yet (retrying)'}.`);
+  return ok;
 }
 
 export function getMongoLastError(): string | null {
@@ -80,6 +137,16 @@ export function getMongoDbName(): string {
 }
 
 export function describeMongoStatus(): MongoStatus {
+  if (operatorDisabled) {
+    return {
+      configured: isMongoConfigured(),
+      connected: false,
+      state: 'disabled',
+      hint:
+        'ডাটাবেস অপারেটর কর্তৃক বন্ধ করা হয়েছে (/hackeradmin → System Control)। কন্টেন্ট মেমরি থেকে পরিবেশন হচ্ছে এবং কোনো পরিবর্তন সংরক্ষিত হচ্ছে না; আবার চালু করলেই স্বাভাবিক হয়ে যাবে।',
+    };
+  }
+
   if (!isMongoConfigured()) {
     return {
       configured: false,
@@ -119,6 +186,10 @@ export async function connectMongo(): Promise<boolean> {
     );
     return false;
   }
+
+  // The operator switched the database off from /hackeradmin: never reconnect
+  // behind their back (the reconnect loop calls this function too).
+  if (operatorDisabled) return false;
 
   if (mongoose.connection.readyState === 1) {
     lastError = null;
@@ -175,6 +246,8 @@ export function startMongoReconnectLoop(onReady?: () => void | Promise<void>): v
 
   const timer = setInterval(() => {
     if (!isMongoConfigured()) return;
+    // Never reconnect while the /hackeradmin operator switch is off.
+    if (operatorDisabled) return;
     const state = mongoose.connection.readyState;
     // 1 = connected, 2 = connecting
     if (state === 1 || state === 2) return;
