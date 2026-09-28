@@ -95,7 +95,7 @@ interface Toast {
  * /hackeradmin/console — the operations console.
  *
  * Everything the old /admin panel could do lives in the CONTENT group (the very
- * same React modules, repainted for the dark surface), and the SYSTEM group adds
+ * same React modules, styled for the navy administration surface), and the SYSTEM group adds
  * what only this console can do: switch the database off/on, freeze public
  * writes, manage the storage gateways, create admin accounts and read the audit
  * trail.
@@ -286,189 +286,173 @@ export const HackerConsole: React.FC = () => {
         setActive(module.id);
         setMenuOpen(false);
       }}
-      className={`flex w-full items-center gap-3 border px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-[0.12em] transition ${
-        active === module.id
-          ? 'border-[color:var(--ha-line-strong)] bg-[rgba(57,255,158,0.12)] text-[color:var(--ha-green)]'
-          : 'border-transparent text-[color:var(--ha-muted)] hover:border-[color:var(--ha-line)] hover:bg-[rgba(255,255,255,0.03)] hover:text-[color:var(--ha-text)]'
+      aria-current={active === module.id ? 'page' : undefined}
+      className={`ha-nav-button flex w-full items-center gap-3 px-3 py-2.5 text-left text-[11px] font-semibold transition ${
+        active === module.id ? 'is-active' : ''
       }`}
     >
-      <span className="text-[10px] text-[color:var(--ha-green-dim)]">{module.code}</span>
-      {module.icon}
-      <span className="truncate">{module.label}</span>
+      <span className="ha-nav-code">{module.code}</span>
+      <span className="ha-nav-icon">{module.icon}</span>
+      <span className="ha-nav-label truncate">{module.label}</span>
     </button>
   );
 
   return (
-    <div className="ha-dark min-h-screen">
-      {/* ── top rail ─────────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 border-b border-[color:var(--ha-line)] bg-[rgba(4,8,10,0.92)] backdrop-blur">
-        <div className="flex flex-wrap items-center gap-3 px-3 py-2.5 sm:px-5">
+    <div className="ha-console min-h-screen">
+      {/* Primary console navigation */}
+      <header className="ha-topbar sticky top-0 z-30">
+        <div className="ha-topbar-inner flex flex-wrap items-center gap-3 px-3 py-2.5 sm:px-5">
           <button
             onClick={() => setMenuOpen((value) => !value)}
-            className="border border-[color:var(--ha-line)] p-2 text-[color:var(--ha-green)] lg:hidden"
-            aria-label="Toggle modules"
+            className="ha-icon-button lg:hidden"
+            aria-label="Toggle module navigation"
+            aria-expanded={menuOpen}
           >
             {menuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>
 
-          <Link to="/hackeradmin/console" className="flex items-center gap-2">
-            <span className="grid h-8 w-8 place-items-center border border-[color:var(--ha-line-strong)] bg-[rgba(57,255,158,0.1)] text-[color:var(--ha-green)]">
-              <ShieldCheck className="h-4 w-4" />
+          <Link to="/hackeradmin/console" className="ha-brand flex items-center gap-2.5">
+            <span className="ha-brand-mark grid h-9 w-9 place-items-center rounded-lg">
+              <ShieldCheck className="h-5 w-5" />
             </span>
-            <span className="hidden sm:block">
-              <span className="block text-[11px] font-bold uppercase tracking-[0.28em] text-[color:var(--ha-green)]">
-                operations console
-              </span>
-              <span className="block text-[10px] text-[color:var(--ha-muted)]">
-                {user?.name || 'Operations Console'} · passcode session
+            <span>
+              <span className="ha-brand-title block text-sm font-bold">Operations Console</span>
+              <span className="ha-brand-meta hidden text-[10px] sm:block">
+                {user?.name || 'GUSB Administration'} · Secure session
               </span>
             </span>
           </Link>
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <span className="hidden xl:flex xl:items-center xl:gap-2">
-              <Chip label="mongo" value={dbState.toUpperCase()} tone={dbTone} pulse={dbState === 'connected'} />
+            <span className="ha-header-status hidden xl:flex xl:items-center xl:gap-2">
+              <Chip label="MongoDB" value={dbState.toUpperCase()} tone={dbTone} pulse={dbState === 'connected'} />
               <Chip
-                label="media"
-                value={mediaGateway ? mediaGateway.host : 'off'}
+                label="Media"
+                value={mediaGateway ? mediaGateway.host : 'Off'}
                 tone={mediaGateway ? 'green' : 'red'}
                 pulse={Boolean(mediaGateway)}
               />
               <Chip
-                label="docs"
-                value={docGateway ? docGateway.host : 'off'}
+                label="Documents"
+                value={docGateway ? docGateway.host : 'Off'}
                 tone={docGateway ? 'cyan' : 'red'}
                 pulse={Boolean(docGateway)}
               />
-              {snapshot?.control.maintenanceMode ? <Chip label="freeze" value="active" tone="amber" pulse /> : null}
+              {snapshot?.control.maintenanceMode ? <Chip label="Maintenance" value="Active" tone="amber" pulse /> : null}
             </span>
-            <span className="hidden text-[10px] uppercase tracking-[0.18em] text-[color:var(--ha-muted)] md:block">
+            <span className="ha-header-clock hidden text-[10px] md:block">
               {clock.toLocaleTimeString('en-GB')}
             </span>
-            <Link
-              to="/"
-              className="border border-[color:var(--ha-line)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[color:var(--ha-muted)] transition hover:text-[color:var(--ha-green)]"
-            >
-              <Globe className="mr-1 inline h-3.5 w-3.5" /> site
+            <Link to="/" className="ha-topbar-action">
+              <Globe className="h-3.5 w-3.5" />
+              <span>Website</span>
             </Link>
             <button
               onClick={() => {
                 hackerLogout();
                 navigate('/hackeradmin', { replace: true });
               }}
-              className="border border-[rgba(255,77,94,0.45)] bg-[rgba(255,77,94,0.12)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[color:var(--ha-red)] transition hover:bg-[rgba(255,77,94,0.2)]"
+              className="ha-topbar-action ha-topbar-danger"
             >
-              <LogOut className="mr-1 inline h-3.5 w-3.5" /> logout
+              <LogOut className="h-3.5 w-3.5" />
+              <span>Sign out</span>
             </button>
           </div>
         </div>
 
-        {/* mobile module strip */}
-        <div className="flex gap-2 overflow-x-auto border-t border-[color:var(--ha-line)] px-3 py-2 lg:hidden">
+        {/* Compact module navigation for smaller screens */}
+        <div className="ha-mobile-nav flex gap-2 overflow-x-auto px-3 py-2 lg:hidden">
           {modules.map((module) => (
             <button
               key={module.id}
-              onClick={() => setActive(module.id)}
-              className={`whitespace-nowrap border px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] ${
-                active === module.id
-                  ? 'border-[color:var(--ha-line-strong)] bg-[rgba(57,255,158,0.12)] text-[color:var(--ha-green)]'
-                  : 'border-[color:var(--ha-line)] text-[color:var(--ha-muted)]'
+              onClick={() => {
+                setActive(module.id);
+                setMenuOpen(false);
+              }}
+              aria-current={active === module.id ? 'page' : undefined}
+              className={`ha-mobile-nav-button whitespace-nowrap px-3 py-2 text-[10px] font-semibold ${
+                active === module.id ? 'is-active' : ''
               }`}
             >
-              {module.code} · {module.label}
+              {module.label}
             </button>
           ))}
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1600px] gap-5 px-3 py-4 sm:px-5">
-        {/* ── sidebar ────────────────────────────────────────────────────── */}
-        <aside className={`${menuOpen ? 'block' : 'hidden'} w-full shrink-0 lg:block lg:w-64`}>
+      <div className="ha-layout mx-auto flex w-full max-w-[1600px] gap-5 px-3 py-5 sm:px-5">
+        {/* Module navigation */}
+        <aside className={`ha-sidebar ${menuOpen ? 'block' : 'hidden'} w-full shrink-0 lg:block lg:w-64`}>
           <div className="space-y-4 lg:sticky lg:top-24">
-            <nav className="ha-panel p-2">
-              <p className="ha-label px-2 pb-2 pt-1">system control</p>
+            <nav className="ha-panel ha-sidebar-nav p-2" aria-label="System control modules">
+              <p className="ha-label px-2 pb-2 pt-1">System control</p>
               {systemModules.map(navButton)}
             </nav>
-            <nav className="ha-panel p-2">
-              <p className="ha-label px-2 pb-2 pt-1">content modules</p>
+            <nav className="ha-panel ha-sidebar-nav p-2" aria-label="Content management modules">
+              <p className="ha-label px-2 pb-2 pt-1">Content management</p>
               <div className="max-h-[46vh] overflow-y-auto pr-1">{contentModules.map(navButton)}</div>
             </nav>
-            <div className="ha-panel p-3 text-[10px] leading-relaxed text-[color:var(--ha-muted)]">
-              <p className="flex items-center gap-2 text-[color:var(--ha-green)]">
-                <Server className="h-3.5 w-3.5" /> {snapshot ? `uptime ${formatDuration(snapshot.process.uptimeSeconds)}` : 'connecting…'}
+            <div className="ha-panel ha-sidebar-meta p-3 text-[10px] leading-relaxed">
+              <p className="ha-meta-line flex items-center gap-2">
+                <Server className="h-3.5 w-3.5" />
+                {snapshot ? `Uptime ${formatDuration(snapshot.process.uptimeSeconds)}` : 'Connecting to services'}
               </p>
-              <p className="mt-1 flex items-center gap-2">
-                <Database className="h-3.5 w-3.5" /> mongo {dbState} · {snapshot?.mongo.target || '—'}
+              <p className="ha-meta-line mt-2 flex items-center gap-2">
+                <Database className="h-3.5 w-3.5" /> MongoDB {dbState} · {snapshot?.mongo.target || '—'}
               </p>
-              <p className="mt-1 flex items-center gap-2">
-                <Cloud className="h-3.5 w-3.5" /> {mediaGateway ? mediaGateway.name : 'media gateway off'}
+              <p className="ha-meta-line mt-2 flex items-center gap-2">
+                <Cloud className="h-3.5 w-3.5" /> {mediaGateway ? mediaGateway.name : 'Media gateway off'}
               </p>
-              <p className="mt-1 flex items-center gap-2">
-                <Cpu className="h-3.5 w-3.5" /> node {snapshot?.process.node || '—'}
+              <p className="ha-meta-line mt-2 flex items-center gap-2">
+                <Cpu className="h-3.5 w-3.5" /> Node {snapshot?.process.node || '—'}
               </p>
-              <p className="mt-2 text-[color:var(--ha-green-dim)]">
-                {snapshot ? `synced ${timeAgo(snapshot.time)}` : 'waiting for first sync'}
-              </p>
+              <p className="ha-meta-sync mt-3">{snapshot ? `Last updated ${timeAgo(snapshot.time)}` : 'Waiting for first update'}</p>
             </div>
           </div>
         </aside>
 
-        {/* ── module surface ─────────────────────────────────────────────── */}
-        <main className="min-w-0 flex-1">
-          <div className="ha-boot mb-4 flex flex-wrap items-end justify-between gap-3">
+        {/* Active module workspace */}
+        <main className="ha-main min-w-0 flex-1">
+          <div className="ha-page-heading ha-boot mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <p className="ha-label">
-                module {current.code} · {current.group === 'system' ? 'system control' : 'content'}
+              <p className="ha-module-caption">
+                {current.group === 'system' ? 'System control' : 'Content management'}
+                <span aria-hidden="true"> / </span>
+                {current.code}
               </p>
-              <h1 className="mt-1 text-xl font-bold uppercase tracking-[0.16em] text-[color:var(--ha-green)] ha-glow">
-                {current.label}
-              </h1>
-              <p className="mt-1 text-[11px] text-[color:var(--ha-muted)]">{current.description}</p>
+              <h1 className="ha-module-title mt-1 text-2xl font-bold">{current.label}</h1>
+              <p className="ha-module-description mt-1 text-[11px]">{current.description}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--ha-muted)]">
-                {syncing ? 'syncing…' : `last sync ${snapshot ? timeAgo(snapshot.time) : '—'}`}
-              </span>
+            <div className="ha-sync-status flex items-center gap-2 text-[10px]">
+              <span className={`ha-sync-dot ${syncing ? 'is-syncing' : ''}`} />
+              {syncing ? 'Updating system status' : `Last updated ${snapshot ? timeAgo(snapshot.time) : '—'}`}
             </div>
           </div>
 
           {renderModule()}
 
-          <footer className="mt-5 flex flex-wrap items-center gap-3 border-t border-[color:var(--ha-line)] pt-3 text-[10px] uppercase tracking-[0.16em] text-[color:var(--ha-muted)]">
-            <span className="inline-flex items-center gap-2 text-[color:var(--ha-green)]">
-              <span className="ha-dot-live inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--ha-green)]" /> console online
+          <footer className="ha-console-footer mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3 text-[10px]">
+            <span className="inline-flex items-center gap-2">
+              <span className="ha-sync-dot" /> Services operational
             </span>
-            <span>audit: {auditSource}</span>
-            <span>gateways: {snapshot?.gateways.enabled ?? 0} enabled</span>
+            <span>Audit storage: {auditSource}</span>
+            <span>Active gateways: {snapshot?.gateways.enabled ?? 0}</span>
             {snapshot?.content.pendingWrites ? (
-              <span className="text-[color:var(--ha-amber)]">{snapshot.content.pendingWrites} pending writes</span>
+              <span className="ha-footer-warning">{snapshot.content.pendingWrites} pending changes</span>
             ) : null}
-            <span className="ml-auto">vdo_bogura · operations</span>
+            <span className="ml-auto">GUSB · Administration</span>
           </footer>
         </main>
       </div>
 
-      {/* ── toasts ───────────────────────────────────────────────────────── */}
+      {/* Feedback for completed operator actions */}
       <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(92vw,380px)] flex-col gap-2">
         {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className={`ha-boot pointer-events-auto border px-3 py-2 text-[11px] leading-relaxed ${
-              toast.tone === 'red'
-                ? 'border-[rgba(255,77,94,0.5)] bg-[rgba(40,6,10,0.95)] text-[#ffb3ba]'
-                : toast.tone === 'amber'
-                  ? 'border-[rgba(255,181,69,0.5)] bg-[rgba(38,26,4,0.95)] text-[#ffdca8]'
-                  : 'border-[color:var(--ha-line-strong)] bg-[rgba(6,20,15,0.95)] text-[#c8f7e0]'
-            }`}
-          >
-            <span className="mr-2 inline-flex align-middle">
-              {toast.tone === 'red' ? (
-                <AlertTriangle className="h-3.5 w-3.5" />
-              ) : (
-                <CheckCircle2 className="h-3.5 w-3.5" />
-              )}
+          <div key={toast.id} className={`ha-toast ha-toast-${toast.tone} pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2.5 text-[11px] leading-relaxed`}>
+            <span className="mt-0.5 inline-flex shrink-0">
+              {toast.tone === 'red' ? <AlertTriangle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
             </span>
-            {toast.message}
+            <span>{toast.message}</span>
           </div>
         ))}
       </div>

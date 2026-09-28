@@ -200,7 +200,7 @@ export const GatewayPanel: React.FC<{
         ) : null}
 
         {open ? (
-          <form onSubmit={submit} className="mt-4 grid gap-3 border border-[color:var(--ha-line-strong)] bg-[rgba(57,255,158,0.04)] p-4 sm:grid-cols-2">
+          <form onSubmit={submit} className="mt-4 grid gap-3 border border-[color:var(--ha-line-strong)] bg-[#F3F7FC] p-4 sm:grid-cols-2">
             <Field label="type">
               <select
                 className={inputClass}
@@ -336,8 +336,8 @@ export const GatewayPanel: React.FC<{
               key={gateway.id}
               className={`border p-4 ${
                 gateway.active
-                  ? 'border-[color:var(--ha-line-strong)] bg-[rgba(57,255,158,0.06)]'
-                  : 'border-[color:var(--ha-line)] bg-[rgba(255,255,255,0.02)]'
+                  ? 'border-[color:var(--ha-line-strong)] bg-[#EAF1F9]'
+                  : 'border-[color:var(--ha-line)] bg-slate-50'
               }`}
             >
               <div className="flex flex-wrap items-start justify-between gap-3">

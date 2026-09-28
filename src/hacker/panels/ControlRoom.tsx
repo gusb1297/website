@@ -303,7 +303,7 @@ export const ControlRoom: React.FC<{
           ) : (
             <ul className="space-y-2">
               {audit.slice(0, 8).map((entry) => (
-                <li key={entry.id} className="border border-[color:var(--ha-line)] bg-[rgba(255,255,255,0.02)] px-3 py-2">
+                <li key={entry.id} className="border border-[color:var(--ha-line)] bg-slate-50 px-3 py-2">
                   <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em]">
                     <span
                       className={

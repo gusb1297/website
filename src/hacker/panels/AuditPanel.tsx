@@ -110,7 +110,7 @@ export const AuditPanel: React.FC<{
 
       <ul className="mt-3 space-y-2">
         {filtered.map((entry) => (
-          <li key={entry.id} className="border border-[color:var(--ha-line)] bg-[rgba(255,255,255,0.02)] px-3 py-2">
+          <li key={entry.id} className="border border-[color:var(--ha-line)] bg-slate-50 px-3 py-2">
             <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em]">
               <span className={LEVEL_TEXT[entry.level]}>
                 <History className="mr-1 inline h-3 w-3" />
