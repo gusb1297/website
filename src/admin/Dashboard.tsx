@@ -16,7 +16,6 @@ import { ManagePages } from './ManagePages';
 import { ManageSettings } from './ManageSettings';
 import { ManageAdmins } from './ManageAdmins';
 import { ManageBackups } from './ManageBackups';
-import { StorageStatusBanner } from './StorageStatusBanner';
 import { AdminMobileNav } from './AdminMobileNav';
 import {
   Sliders,
@@ -144,9 +143,6 @@ export const Dashboard: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Where are uploads & edits stored? Warns loudly when they would be lost on deploy. */}
-        <StorageStatusBanner />
-
         <div className="grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-12 xl:gap-8">
           {/* Desktop sidebar; phones use the admin-only bottom navigation. */}
           <div className="hidden min-w-0 space-y-2 lg:col-span-3 lg:block">

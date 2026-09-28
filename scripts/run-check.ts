@@ -187,6 +187,29 @@ async function bootProbe(useDatabase: boolean, productionBuild = false): Promise
         path: '/api/backups',
         expect: 401,
       },
+      { label: 'GET /hackeradmin serves the console shell', path: '/hackeradmin', expect: 200 },
+      { label: 'GET /hackeradmin/console serves the console shell', path: '/hackeradmin/console', expect: 200 },
+      { label: 'GET /api/hackeradmin/system without a token is refused (401)', path: '/api/hackeradmin/system', expect: 401 },
+      {
+        label: 'POST /api/hackeradmin/login rejects a wrong passcode (401)',
+        path: '/api/hackeradmin/login',
+        method: 'POST',
+        body: { passcode: 'definitely-not-the-passcode' },
+        expect: 401,
+      },
+      {
+        label: 'POST /api/hackeradmin/login accepts the passcode and returns a console token',
+        path: '/api/hackeradmin/login',
+        method: 'POST',
+        body: { passcode: process.env.HACKER_ADMIN_PASSCODE || 'Mohi@99221' },
+        expect: 200,
+        check: (body) => {
+          const payload = body as { token?: string; hours?: number };
+          if (!payload?.token) return 'no token in the answer';
+          if (!payload.hours) return 'no session length in the answer';
+          return null;
+        },
+      },
     ]);
 
     if (!useDatabase) {
@@ -212,15 +235,19 @@ async function bootProbe(useDatabase: boolean, productionBuild = false): Promise
 async function main(): Promise<void> {
   console.log('\x1b[1mGUSB website — production readiness check\x1b[0m');
 
-  step('1/5  TypeScript');
+  step('1/6  TypeScript');
   if (run('npx', ['tsc', '--noEmit']) === 0) ok('no type errors');
   else bad('type check failed');
 
-  step('2/5  Content layer (load / write / backup / restore)');
+  step('2/6  Content layer (load / write / backup / restore)');
   if (run('npx', ['tsx', 'scripts/smoke-test.ts']) === 0) ok('smoke test passed');
   else bad('smoke test failed');
 
-  step('3/5  Production build');
+  step('3/6  /hackeradmin screens render (passcode gate + console modules)');
+  if (run('npx', ['tsx', 'scripts/console-smoke.tsx']) === 0) ok('every console screen rendered');
+  else bad('a console screen failed to render');
+
+  step('3/6  /hackeradmin screens render');
   if (run('npx', ['vite', 'build', '--logLevel', 'warn']) === 0) ok('frontend built into dist/');
   else bad('frontend build failed');
   if (
@@ -241,13 +268,13 @@ async function main(): Promise<void> {
   }
   assert('dist/index.html exists', fs.existsSync(path.join(ROOT, 'dist', 'index.html')));
 
-  step('4/5  Boot & HTTP probe without a database (fail-closed behaviour)');
+  step('5/6  Boot & HTTP probe without a database (fail-closed behaviour)');
   await bootProbe(false);
   if (fs.existsSync(path.join(ROOT, 'dist', 'server.cjs'))) {
     await bootProbe(false, true);
   }
 
-  step('5/5  End-to-end test with MongoDB');
+  step('6/6  End-to-end test with MongoDB');
   if (process.env.MONGODB_URI) {
     if (run('npx', ['tsx', 'scripts/e2e-test.ts']) === 0) ok('end-to-end database test passed');
     else bad('end-to-end database test failed');

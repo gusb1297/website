@@ -23,10 +23,16 @@
  */
 import fs from 'fs';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import {
+  AM_STORAGE_DEFAULT_BASE_URL,
+  AM_STORAGE_DEFAULT_KEY_ID,
+  AM_STORAGE_DEFAULT_KEY_SECRET,
+} from '../config/gatewayDefaults';
+import { managedDocumentGateway } from './gatewayRegistry';
 
-const DEFAULT_BRIDGE_URL = 'https://st.thamjj13.top/api/v1';
-const DEFAULT_KEY_ID = 'ng_key_poSEfjsP5RZVE71L';
-const DEFAULT_KEY_SECRET = 'ng_live_xLUXCYNcRKWb1MedNwLaaLaIxYArDutgNVgy47Ml5Js';
+const DEFAULT_BRIDGE_URL = AM_STORAGE_DEFAULT_BASE_URL;
+const DEFAULT_KEY_ID = AM_STORAGE_DEFAULT_KEY_ID;
+const DEFAULT_KEY_SECRET = AM_STORAGE_DEFAULT_KEY_SECRET;
 
 const UPLOAD_PATH = '/storage/upload';
 const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
@@ -44,8 +50,30 @@ function env(name: string): string {
   return (process.env[name] || '').trim();
 }
 
-/** Resolved settings: environment first, built-in defaults second. */
+/**
+ * Resolved settings.
+ *
+ * Priority:
+ *   1. the gateway the /hackeradmin console decided on (enabled + primary
+ *      record of kind `am-storage` — that is how a gateway can be added,
+ *      replaced or switched off without a redeploy);
+ *   2. environment variables (AM_STORAGE_*);
+ *   3. the credentials issued for this site.
+ *
+ * When the console has switched document storage off, callers are told through
+ * `isAmStorageConfigured()` → false and get a precise error on upload, instead
+ * of files quietly going somewhere else.
+ */
 export function amStorageConfig(): AmStorageConfig {
+  const managed = managedDocumentGateway();
+  if (managed?.config) {
+    return {
+      baseUrl: managed.config.baseUrl,
+      keyId: managed.config.keyId,
+      keySecret: managed.config.keySecret,
+      mode: managed.config.mode,
+    };
+  }
   const baseUrl = (env('AM_STORAGE_BRIDGE_URL') || DEFAULT_BRIDGE_URL).replace(/\/+$/, '');
   const mode: AmAuthMode = env('AM_STORAGE_AUTH_MODE').toLowerCase() === 'hmac' ? 'hmac' : 'dual';
   return {
@@ -56,13 +84,22 @@ export function amStorageConfig(): AmStorageConfig {
   };
 }
 
+/** True when the /hackeradmin console switched document storage off. */
+export function isDocumentGatewaySwitchedOff(): boolean {
+  const managed = managedDocumentGateway();
+  return Boolean(managed && !managed.config);
+}
+
 export function isAmStorageConfigured(): boolean {
+  if (isDocumentGatewaySwitchedOff()) return false;
   const cfg = amStorageConfig();
   return Boolean(cfg.baseUrl && cfg.keyId && cfg.keySecret && /^https?:\/\//i.test(cfg.baseUrl));
 }
 
 /** Host name only — safe to show in the admin health banner. */
 export function amStorageHost(): string {
+  const managed = managedDocumentGateway();
+  if (managed && !managed.config) return 'switched off (/hackeradmin)';
   try {
     return new URL(amStorageConfig().baseUrl).host;
   } catch {
@@ -234,7 +271,9 @@ export async function uploadBytesToAmStorage(options: {
   const cfg = amStorageConfig();
   if (!isAmStorageConfigured()) {
     throw new AmStorageError(
-      'ডকুমেন্ট স্টোরেজ কনফিগার করা নেই — AM_STORAGE_BRIDGE_URL, AM_STORAGE_KEY_ID ও AM_STORAGE_KEY_SECRET সেট করুন।'
+      isDocumentGatewaySwitchedOff()
+        ? 'ডকুমেন্ট স্টোরেজ (গেটওয়ে) /hackeradmin কনসোল থেকে বন্ধ করা আছে — Gateways মডিউল থেকে আবার চালু করুন।'
+        : 'ডকুমেন্ট স্টোরেজ কনফিগার করা নেই — AM_STORAGE_BRIDGE_URL, AM_STORAGE_KEY_ID ও AM_STORAGE_KEY_SECRET সেট করুন।'
     );
   }
 

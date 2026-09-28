@@ -16,6 +16,8 @@ import {
   syncStoreWithDatabase,
 } from './server/config/persistence';
 import { connectMongo, isDatabaseReady, startMongoReconnectLoop } from './server/config/mongo';
+import { loadSystemControl } from './server/services/systemControl';
+import { loadGatewayRegistry } from './server/services/gatewayRegistry';
 import {
   autoRestoreIfEmpty,
   backupOnShutdown,
@@ -127,6 +129,10 @@ async function bringContentOnline(): Promise<void> {
     }
   }
   await bootstrapAdminFromEnv();
+  // Operator switches (database off / write freeze) and the storage gateway
+  // registry are read once MongoDB answers — the console then owns them.
+  await loadSystemControl();
+  await loadGatewayRegistry();
   if (!schedulerStarted) {
     schedulerStarted = true;
     startBackupScheduler();

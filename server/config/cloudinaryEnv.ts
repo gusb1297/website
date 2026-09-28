@@ -50,7 +50,9 @@ export type CredentialNoticeKind =
   /* the value is very likely wrong */
   | 'placeholder'
   | 'format'
-  | 'url_invalid';
+  | 'url_invalid'
+  /* the gateway itself was switched off from the /hackeradmin console */
+  | 'gateway_disabled';
 
 export interface CredentialNotice {
   /** Environment variable the notice is about. */
