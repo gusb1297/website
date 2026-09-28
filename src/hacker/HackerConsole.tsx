@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Activity,
+  AlertTriangle,
   BookOpen,
   Briefcase,
+  CheckCircle2,
   Cloud,
-  Cpu,
   Database,
   DatabaseBackup,
   FileText,
@@ -19,6 +20,7 @@ import {
   Menu,
   Newspaper,
   Plug,
+  RefreshCw,
   Server,
   Settings as SettingsIcon,
   ShieldCheck,
@@ -28,13 +30,11 @@ import {
   UserCog,
   Video,
   X,
-  CheckCircle2,
-  AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AuditEntry, GatewayListResponse, SystemSnapshot, consoleApi, formatDuration, timeAgo } from './api';
 import { Chip, Tone } from './ui';
-import { ControlRoom } from './panels/ControlRoom';
+import { ControlRoom, SyncState } from './panels/ControlRoom';
 import { GatewayPanel } from './panels/GatewayPanel';
 import { ConsoleAdminsPanel } from './panels/ConsoleAdminsPanel';
 import { AuditPanel } from './panels/AuditPanel';
@@ -53,6 +53,12 @@ import { ManagePartners } from '../admin/ManagePartners';
 import { ManageStats } from '../admin/ManageStats';
 import { ManageSettings } from '../admin/ManageSettings';
 import { ManageBackups } from '../admin/ManageBackups';
+
+/**
+ * How often the console re-fetches the system snapshot. Displayed in the UI as
+ * the real auto-refresh interval — never a decorative "10s" label.
+ */
+export const REFRESH_INTERVAL_SECONDS = 15;
 
 type ModuleId =
   | 'control'
@@ -77,7 +83,6 @@ type ModuleId =
 
 interface ModuleDef {
   id: ModuleId;
-  code: string;
   label: string;
   description: string;
   icon: React.ReactNode;
@@ -95,10 +100,13 @@ interface Toast {
  * /hackeradmin/console — the operations console.
  *
  * Everything the old /admin panel could do lives in the CONTENT group (the very
- * same React modules, styled for the navy administration surface), and the SYSTEM group adds
- * what only this console can do: switch the database off/on, freeze public
- * writes, manage the storage gateways, create admin accounts and read the audit
- * trail.
+ * same React modules, styled for the navy administration surface), and the
+ * SYSTEM group adds what only this console can do: switch the database off/on,
+ * freeze public writes, manage the storage gateways, create admin accounts and
+ * read the audit trail.
+ *
+ * Every number rendered here comes from GET /api/hackeradmin/system, which runs
+ * a real MongoDB `ping` and reads live process/database state on the server.
  */
 export const HackerConsole: React.FC = () => {
   const { token, user, hackerLogout, isHackerSession, hackerSessionExpired } = useAuth();
@@ -113,6 +121,10 @@ export const HackerConsole: React.FC = () => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [clock, setClock] = useState(() => new Date());
   const [syncing, setSyncing] = useState(false);
+  /** Client time of the last successful snapshot fetch (null = never). */
+  const [lastSyncOkAt, setLastSyncOkAt] = useState<number | null>(null);
+  /** Message of the last failed refresh (null = last refresh succeeded). */
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const toastId = useRef(0);
 
   const pushToast = useCallback((message: string, tone: Tone = 'green') => {
@@ -134,6 +146,8 @@ export const HackerConsole: React.FC = () => {
       setGateways(system.gateways);
       setAudit(auditLog.entries);
       setAuditSource(auditLog.source);
+      setLastSyncOkAt(Date.now());
+      setRefreshError(null);
     } catch (err) {
       const status = (err as { status?: number }).status;
       if (status === 401 || status === 403) {
@@ -141,7 +155,9 @@ export const HackerConsole: React.FC = () => {
         navigate('/hackeradmin', { replace: true });
         return;
       }
-      pushToast((err as Error).message, 'red');
+      // Keep the previous snapshot for context, but record the failure: the UI
+      // must stop claiming "CONNECTED" and say "Unable to refresh" instead.
+      setRefreshError((err as Error).message || 'অজানা সমস্যা');
     } finally {
       setSyncing(false);
     }
@@ -153,7 +169,7 @@ export const HackerConsole: React.FC = () => {
       return;
     }
     void refresh();
-    const poll = setInterval(() => void refresh(), 10_000);
+    const poll = setInterval(() => void refresh(), REFRESH_INTERVAL_SECONDS * 1000);
     const tick = setInterval(() => setClock(new Date()), 1000);
     return () => {
       clearInterval(poll);
@@ -166,15 +182,13 @@ export const HackerConsole: React.FC = () => {
     () => [
       {
         id: 'control',
-        code: '00',
         label: 'Control Room',
-        description: 'Master switches, maintenance actions, live state',
+        description: 'System control, live operational status and maintenance actions',
         icon: <Gauge className="h-4 w-4" />,
         group: 'system',
       },
       {
         id: 'gateways',
-        code: '01',
         label: 'Gateways',
         description: 'Add, test, disable and delete storage gateways',
         icon: <Plug className="h-4 w-4" />,
@@ -182,7 +196,6 @@ export const HackerConsole: React.FC = () => {
       },
       {
         id: 'admins',
-        code: '02',
         label: 'Admin Accounts',
         description: 'Create / disable / delete administrator logins',
         icon: <UserCog className="h-4 w-4" />,
@@ -190,7 +203,6 @@ export const HackerConsole: React.FC = () => {
       },
       {
         id: 'audit',
-        code: '03',
         label: 'Audit Log',
         description: 'Every privileged action, rate-limited attempts included',
         icon: <History className="h-4 w-4" />,
@@ -198,26 +210,25 @@ export const HackerConsole: React.FC = () => {
       },
       {
         id: 'telemetry',
-        code: '04',
         label: 'Telemetry',
-        description: 'Process, MongoDB, storage, collections, snapshots',
+        description: 'Process, database, storage, collections and snapshots',
         icon: <Activity className="h-4 w-4" />,
         group: 'system',
       },
-      { id: 'slides', code: '10', label: 'Hero Slider', description: 'হোম পেজের স্লাইডার', icon: <Sliders className="h-4 w-4" />, group: 'content', element: <ManageHeroSlider /> },
-      { id: 'pages', code: '11', label: 'Home & About', description: 'হোম ও About কন্টেন্ট', icon: <LayoutTemplate className="h-4 w-4" />, group: 'content', element: <ManagePages /> },
-      { id: 'programs', code: '12', label: 'Projects', description: 'প্রজেক্টসমূহ', icon: <Sprout className="h-4 w-4" />, group: 'content', element: <ManagePrograms /> },
-      { id: 'news', code: '13', label: 'News & Events', description: 'সংবাদ ও ইভেন্ট', icon: <Newspaper className="h-4 w-4" />, group: 'content', element: <ManageNews /> },
-      { id: 'videos', code: '14', label: 'Video Gallery', description: 'ভিডিও গ্যালারি', icon: <Video className="h-4 w-4" />, group: 'content', element: <ManageVideos /> },
-      { id: 'gallery', code: '15', label: 'Photo Gallery', description: 'ফটো গ্যালারি', icon: <ImageIcon className="h-4 w-4" />, group: 'content', element: <ManageGallery /> },
-      { id: 'publications', code: '16', label: 'Publications', description: 'পাবলিকেশন (PDF)', icon: <BookOpen className="h-4 w-4" />, group: 'content', element: <ManagePublications /> },
-      { id: 'notices', code: '17', label: 'Notice Board', description: 'নোটিশ বোর্ড', icon: <FileText className="h-4 w-4" />, group: 'content', element: <ManageNotices /> },
-      { id: 'career', code: '18', label: 'Career', description: 'ক্যারিয়ার ও আবেদন', icon: <Briefcase className="h-4 w-4" />, group: 'content', element: <ManageCareer /> },
-      { id: 'committee', code: '19', label: 'Committee', description: 'পরিচালনা পরিষদ', icon: <Users className="h-4 w-4" />, group: 'content', element: <ManageCommittee /> },
-      { id: 'partners', code: '1A', label: 'Partners', description: 'পার্টনার ও ডোনার', icon: <Handshake className="h-4 w-4" />, group: 'content', element: <ManagePartners /> },
-      { id: 'stats', code: '1B', label: 'Statistics', description: 'পরিসংখ্যান কাউন্টার', icon: <Gauge className="h-4 w-4" />, group: 'content', element: <ManageStats /> },
-      { id: 'settings', code: '1C', label: 'Site Settings', description: 'ওয়েবসাইট সেটিংস ও রঙ', icon: <SettingsIcon className="h-4 w-4" />, group: 'content', element: <ManageSettings /> },
-      { id: 'backups', code: '1D', label: 'Backups & Restore', description: 'ব্যাকআপ ও রিস্টোর', icon: <DatabaseBackup className="h-4 w-4" />, group: 'content', element: <ManageBackups /> },
+      { id: 'slides', label: 'Hero Slider', description: 'হোম পেজের স্লাইডার', icon: <Sliders className="h-4 w-4" />, group: 'content', element: <ManageHeroSlider /> },
+      { id: 'pages', label: 'Home & About', description: 'হোম ও পরিচিতি পেজের কন্টেন্ট', icon: <LayoutTemplate className="h-4 w-4" />, group: 'content', element: <ManagePages /> },
+      { id: 'programs', label: 'Projects', description: 'প্রজেক্টসমূহ', icon: <Sprout className="h-4 w-4" />, group: 'content', element: <ManagePrograms /> },
+      { id: 'news', label: 'News & Events', description: 'সংবাদ ও ইভেন্ট', icon: <Newspaper className="h-4 w-4" />, group: 'content', element: <ManageNews /> },
+      { id: 'videos', label: 'Video Gallery', description: 'ভিডিও গ্যালারি', icon: <Video className="h-4 w-4" />, group: 'content', element: <ManageVideos /> },
+      { id: 'gallery', label: 'Photo Gallery', description: 'ফটো গ্যালারি', icon: <ImageIcon className="h-4 w-4" />, group: 'content', element: <ManageGallery /> },
+      { id: 'publications', label: 'Publications', description: 'পাবলিকেশন (PDF)', icon: <BookOpen className="h-4 w-4" />, group: 'content', element: <ManagePublications /> },
+      { id: 'notices', label: 'Notice Board', description: 'নোটিশ বোর্ড', icon: <FileText className="h-4 w-4" />, group: 'content', element: <ManageNotices /> },
+      { id: 'career', label: 'Career', description: 'ক্যারিয়ার ও আবেদন', icon: <Briefcase className="h-4 w-4" />, group: 'content', element: <ManageCareer /> },
+      { id: 'committee', label: 'Committee', description: 'পরিচালনা পরিষদ', icon: <Users className="h-4 w-4" />, group: 'content', element: <ManageCommittee /> },
+      { id: 'partners', label: 'Partners', description: 'পার্টনার ও ডোনার', icon: <Handshake className="h-4 w-4" />, group: 'content', element: <ManagePartners /> },
+      { id: 'stats', label: 'Statistics', description: 'পরিসংখ্যান কাউন্টার', icon: <Gauge className="h-4 w-4" />, group: 'content', element: <ManageStats /> },
+      { id: 'settings', label: 'Site Settings', description: 'ওয়েবসাইট সেটিংস ও রঙ', icon: <SettingsIcon className="h-4 w-4" />, group: 'content', element: <ManageSettings /> },
+      { id: 'backups', label: 'Backups & Restore', description: 'ব্যাকআপ ও রিস্টোর', icon: <DatabaseBackup className="h-4 w-4" />, group: 'content', element: <ManageBackups /> },
     ],
     []
   );
@@ -226,10 +237,61 @@ export const HackerConsole: React.FC = () => {
   const systemModules = modules.filter((module) => module.group === 'system');
   const contentModules = modules.filter((module) => module.group === 'content');
 
+  /* ── live status derived from the last successful fetch ───────────────── */
+
+  // The data is stale when the latest refresh failed, or when nothing has been
+  // received for three consecutive poll intervals (e.g. tab slept).
+  const stale =
+    refreshError !== null ||
+    (lastSyncOkAt !== null && Date.now() - lastSyncOkAt > REFRESH_INTERVAL_SECONDS * 3000);
+  const neverSynced = lastSyncOkAt === null;
+
   const dbState = snapshot?.mongo.state || 'unknown';
-  const dbTone: Tone = dbState === 'connected' ? 'green' : snapshot?.control.databaseEnabled ? 'amber' : 'red';
-  const mediaGateway = snapshot?.gateways.items.find((item) => item.kind === 'cloudinary' && item.active);
-  const docGateway = snapshot?.gateways.items.find((item) => item.kind === 'am-storage' && item.active);
+  const dbTone: Tone = !snapshot
+    ? 'muted'
+    : stale
+      ? 'amber'
+      : dbState === 'connected'
+        ? 'green'
+        : dbState === 'not_configured'
+          ? 'amber'
+          : 'red';
+  const dbValue = !snapshot
+    ? '…'
+    : stale
+      ? 'UNKNOWN'
+      : dbState === 'connected'
+        ? 'ONLINE'
+        : dbState === 'disabled'
+          ? 'OFFLINE (SWITCHED OFF)'
+          : dbState === 'not_configured'
+            ? 'NOT CONFIGURED'
+            : 'OFFLINE';
+
+  const mediaState = snapshot?.storage.state;
+  const mediaConfigured = snapshot?.storage.configured;
+  const mediaValue = !snapshot
+    ? '…'
+    : !mediaConfigured
+      ? 'Not configured'
+      : mediaState === 'ok'
+        ? 'Online'
+        : mediaState === 'checking'
+          ? 'Checking…'
+          : mediaState === 'unknown'
+            ? 'Unknown'
+            : 'Offline';
+  const mediaTone: Tone =
+    !snapshot ? 'muted' : !mediaConfigured ? 'red' : mediaState === 'ok' ? 'green' : mediaState === 'checking' ? 'cyan' : 'red';
+
+  const docsConfigured = snapshot?.storage.documents.configured;
+
+  const sync: SyncState = {
+    intervalSeconds: REFRESH_INTERVAL_SECONDS,
+    lastSuccessAt: lastSyncOkAt,
+    error: refreshError,
+    syncing,
+  };
 
   const renderModule = () => {
     switch (active) {
@@ -239,7 +301,8 @@ export const HackerConsole: React.FC = () => {
             token={token}
             snapshot={snapshot}
             audit={audit}
-            loading={syncing}
+            loading={syncing && !snapshot}
+            sync={sync}
             onRefresh={() => void refresh()}
             onToast={pushToast}
             onOpenAudit={() => setActive('audit')}
@@ -262,16 +325,13 @@ export const HackerConsole: React.FC = () => {
           />
         );
       case 'telemetry':
-        return <TelemetryPanel snapshot={snapshot} />;
+        return <TelemetryPanel snapshot={snapshot} loading={!snapshot && syncing} syncError={refreshError} />;
       default:
         return (
           <div className="ha-window">
             <div className="ha-window-bar">
-              <span className="ha-window-dot" />
               <span>{current.label}</span>
-              <span className="ml-auto text-[10px] text-[color:var(--ha-muted)]">
-                module {current.code} · content editor
-              </span>
+              <span className="ml-auto text-[10px] text-[color:var(--ha-muted)]">content editor</span>
             </div>
             <div className="p-3 sm:p-4">{current.element}</div>
           </div>
@@ -291,11 +351,16 @@ export const HackerConsole: React.FC = () => {
         active === module.id ? 'is-active' : ''
       }`}
     >
-      <span className="ha-nav-code">{module.code}</span>
       <span className="ha-nav-icon">{module.icon}</span>
       <span className="ha-nav-label truncate">{module.label}</span>
     </button>
   );
+
+  const lastSyncLabel = neverSynced
+    ? 'Waiting for first update'
+    : refreshError
+      ? 'Unable to refresh'
+      : `Last updated ${timeAgo(new Date(lastSyncOkAt as number).toISOString())}`;
 
   return (
     <div className="ha-console min-h-screen">
@@ -325,18 +390,16 @@ export const HackerConsole: React.FC = () => {
 
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <span className="ha-header-status hidden xl:flex xl:items-center xl:gap-2">
-              <Chip label="MongoDB" value={dbState.toUpperCase()} tone={dbTone} pulse={dbState === 'connected'} />
-              <Chip
-                label="Media"
-                value={mediaGateway ? mediaGateway.host : 'Off'}
-                tone={mediaGateway ? 'green' : 'red'}
-                pulse={Boolean(mediaGateway)}
-              />
+              {refreshError ? (
+                <Chip label="Sync" value="Unable to refresh" tone="red" />
+              ) : (
+                <Chip label="MongoDB" value={dbValue} tone={dbTone} pulse={!stale && dbState === 'connected'} />
+              )}
+              <Chip label="Media" value={mediaValue} tone={mediaTone} pulse={!stale && mediaState === 'ok'} />
               <Chip
                 label="Documents"
-                value={docGateway ? docGateway.host : 'Off'}
-                tone={docGateway ? 'cyan' : 'red'}
-                pulse={Boolean(docGateway)}
+                value={!snapshot ? '…' : docsConfigured ? 'Configured' : 'Not configured'}
+                tone={docsConfigured ? 'cyan' : 'red'}
               />
               {snapshot?.control.maintenanceMode ? <Chip label="Maintenance" value="Active" tone="amber" pulse /> : null}
             </span>
@@ -380,6 +443,20 @@ export const HackerConsole: React.FC = () => {
         </div>
       </header>
 
+      {/* Honest failure state: a broken refresh is never hidden. */}
+      {refreshError ? (
+        <div className="ha-sync-error-bar" role="alert">
+          <span className="inline-flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            <strong>Unable to refresh</strong>
+            <span className="hidden sm:inline">— statuses below are from {lastSyncOkAt ? timeAgo(new Date(lastSyncOkAt).toISOString()) : 'an earlier fetch'} and may be outdated. ({refreshError})</span>
+          </span>
+          <button onClick={() => void refresh()} className="ha-sync-error-retry" disabled={syncing}>
+            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} /> Retry now
+          </button>
+        </div>
+      ) : null}
+
       <div className="ha-layout mx-auto flex w-full max-w-[1600px] gap-5 px-3 py-5 sm:px-5">
         {/* Module navigation */}
         <aside className={`ha-sidebar ${menuOpen ? 'block' : 'hidden'} w-full shrink-0 lg:block lg:w-64`}>
@@ -398,15 +475,29 @@ export const HackerConsole: React.FC = () => {
                 {snapshot ? `Uptime ${formatDuration(snapshot.process.uptimeSeconds)}` : 'Connecting to services'}
               </p>
               <p className="ha-meta-line mt-2 flex items-center gap-2">
-                <Database className="h-3.5 w-3.5" /> MongoDB {dbState} · {snapshot?.mongo.target || '—'}
+                <Database className="h-3.5 w-3.5" />
+                {!snapshot ? (
+                  'MongoDB — checking…'
+                ) : stale ? (
+                  // Never present a cached ONLINE as current: the last refresh failed.
+                  `MongoDB — status unknown (refresh failed${snapshot.mongo.ping.checkedAt ? `, last verified ${timeAgo(snapshot.mongo.ping.checkedAt)}` : ''})`
+                ) : (
+                  <>
+                    MongoDB {snapshot.mongo.state === 'connected' ? 'ONLINE' : snapshot.mongo.state === 'disabled' ? 'OFFLINE (switched off)' : snapshot.mongo.state === 'not_configured' ? 'NOT CONFIGURED' : 'OFFLINE'}
+                    {snapshot.mongo.ping.checkedAt ? ` · checked ${timeAgo(snapshot.mongo.ping.checkedAt)}` : ''}
+                  </>
+                )}
               </p>
               <p className="ha-meta-line mt-2 flex items-center gap-2">
-                <Cloud className="h-3.5 w-3.5" /> {mediaGateway ? mediaGateway.name : 'Media gateway off'}
+                <Cloud className="h-3.5 w-3.5" />
+                {mediaConfigured
+                  ? `Media storage ${mediaValue.toLowerCase()}`
+                  : 'Media storage not configured'}
               </p>
               <p className="ha-meta-line mt-2 flex items-center gap-2">
-                <Cpu className="h-3.5 w-3.5" /> Node {snapshot?.process.node || '—'}
+                <Activity className="h-3.5 w-3.5" /> Node {snapshot?.process.node || '—'}
               </p>
-              <p className="ha-meta-sync mt-3">{snapshot ? `Last updated ${timeAgo(snapshot.time)}` : 'Waiting for first update'}</p>
+              <p className={`ha-meta-sync mt-3 ${refreshError ? 'is-error' : ''}`}>{lastSyncLabel}</p>
             </div>
           </div>
         </aside>
@@ -417,26 +508,35 @@ export const HackerConsole: React.FC = () => {
             <div>
               <p className="ha-module-caption">
                 {current.group === 'system' ? 'System control' : 'Content management'}
-                <span aria-hidden="true"> / </span>
-                {current.code}
               </p>
               <h1 className="ha-module-title mt-1 text-2xl font-bold">{current.label}</h1>
               <p className="ha-module-description mt-1 text-[11px]">{current.description}</p>
             </div>
-            <div className="ha-sync-status flex items-center gap-2 text-[10px]">
-              <span className={`ha-sync-dot ${syncing ? 'is-syncing' : ''}`} />
-              {syncing ? 'Updating system status' : `Last updated ${snapshot ? timeAgo(snapshot.time) : '—'}`}
+            <div className={`ha-sync-status flex items-center gap-2 text-[10px] ${refreshError ? 'is-error' : ''}`}>
+              <span className={`ha-sync-dot ${syncing ? 'is-syncing' : refreshError ? 'is-error' : ''}`} />
+              {refreshError
+                ? 'Unable to refresh'
+                : syncing && !snapshot
+                  ? 'Loading system status…'
+                  : syncing
+                    ? 'Updating system status…'
+                    : lastSyncLabel}
             </div>
           </div>
 
           {renderModule()}
 
           <footer className="ha-console-footer mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-3 text-[10px]">
-            <span className="inline-flex items-center gap-2">
-              <span className="ha-sync-dot" /> Services operational
+            <span className={refreshError ? 'ha-footer-warning' : ''}>
+              <span className={`ha-sync-dot inline-block align-middle ${refreshError ? 'is-error' : ''} mr-1.5`} />
+              {refreshError
+                ? 'Sync failing — statuses may be outdated'
+                : neverSynced
+                  ? 'Waiting for first status update'
+                  : `Sync OK — updated ${timeAgo(new Date(lastSyncOkAt as number).toISOString())}`}
             </span>
             <span>Audit storage: {auditSource}</span>
-            <span>Active gateways: {snapshot?.gateways.enabled ?? 0}</span>
+            <span>Active gateways: {snapshot?.gateways.enabled ?? '—'}</span>
             {snapshot?.content.pendingWrites ? (
               <span className="ha-footer-warning">{snapshot.content.pendingWrites} pending changes</span>
             ) : null}

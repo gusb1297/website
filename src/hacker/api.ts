@@ -105,7 +105,13 @@ export interface SystemSnapshot {
     hint: string;
     operatorDisabled: boolean;
     disabledAt: string | null;
-    target: string;
+    /** Result of the server-side `ping` command — the only proof of ONLINE. */
+    ping: {
+      ok: boolean;
+      checkedAt: string;
+      latencyMs: number | null;
+      error: string | null;
+    };
     reconnectLoop: string;
   };
   storage: {
@@ -115,7 +121,8 @@ export interface SystemSnapshot {
     cloudName?: string;
     folder: string;
     lastCheck: { ok: boolean; at: string; state?: string; error?: string } | null;
-    documents: { provider: string; configured: boolean; host: string };
+    /** Document gateway: provider + configured only (no raw host). */
+    documents: { provider: string; configured: boolean };
     hint: string;
   };
   content: {
@@ -143,7 +150,7 @@ export interface SystemSnapshot {
   gateways: GatewayListResponse;
   audit: { inMemory: number; databaseWrites: number; databaseFailures: number };
   admins: { total: number; active: number } | null;
-  session: { passcodeFromEnvironment: boolean; passcodeLength: number; throttle: { trackedIps: number; lockedIps: number } };
+  session: { passcodeFromEnvironment: boolean; throttle: { trackedIps: number; lockedIps: number } };
 }
 
 export class ConsoleApiError extends Error {

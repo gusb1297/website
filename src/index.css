@@ -397,19 +397,11 @@
   border-left-color: #9dbbe0;
   background: rgba(255, 255, 255, 0.12);
 }
-.ha-nav-code {
-  width: 21px;
-  flex: 0 0 21px;
-  color: #aabed6;
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-}
 .ha-nav-icon {
   display: inline-flex;
   color: #b7c8dc;
 }
-.ha-nav-button.is-active .ha-nav-icon,
-.ha-nav-button.is-active .ha-nav-code {
+.ha-nav-button.is-active .ha-nav-icon {
   color: #ffffff;
 }
 .ha-nav-label {
@@ -469,6 +461,14 @@
 .ha-sync-dot.is-syncing {
   background: #b17a1f;
 }
+.ha-sync-dot.is-error,
+.ha-sync-status.is-error,
+.ha-meta-sync.is-error {
+  color: #a33740;
+}
+.ha-sync-dot.is-error {
+  background: #a33740;
+}
 .ha-console-footer {
   color: #728196;
   border-color: #dbe3ed;
@@ -478,6 +478,71 @@
 }
 .ha-footer-warning {
   color: #926b22;
+}
+
+/* Real status card (Control Room → System Status) */
+.ha-status-card {
+  border-radius: 10px;
+  background: #ffffff;
+}
+.ha-status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+.ha-status-dot.is-online {
+  background: #1f7a55;
+  box-shadow: 0 0 0 3px rgba(31, 122, 85, 0.15);
+}
+.ha-status-dot.is-offline {
+  background: #a33740;
+  box-shadow: 0 0 0 3px rgba(163, 55, 64, 0.14);
+}
+.ha-status-dot.is-checking {
+  background: #b17a1f;
+  box-shadow: 0 0 0 3px rgba(177, 122, 31, 0.15);
+  animation: ha-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ha-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* "Unable to refresh" banner below the top bar */
+.ha-sync-error-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid #ecd2d4;
+  background: #fcf1f2;
+  color: #96333a;
+  font-size: 11px;
+}
+.ha-sync-error-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid #e0b7bb;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #96333a;
+  font-size: 10px;
+  font-weight: 700;
+  transition: background-color 150ms ease;
+}
+.ha-sync-error-retry:hover:not(:disabled) {
+  background: #fff7f7;
+}
+.ha-sync-error-retry:disabled {
+  opacity: 0.6;
 }
 
 /* Shared panels, states, fields and actions */

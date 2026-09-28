@@ -245,7 +245,7 @@ export const ManageBackups: React.FC = () => {
             <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">ক্লাউড কপি (AM Storage)</p>
             <p className="mt-1 text-sm font-bold text-slate-800 flex items-center gap-1.5">
               <Cloud className="w-4 h-4 text-slate-400" />
-              {status?.mirror?.enabled ? status.mirror.host : 'বন্ধ'}
+              {status?.mirror?.enabled ? 'সক্রিয় (AM Storage)' : 'বন্ধ'}
             </p>
           </div>
         </div>
