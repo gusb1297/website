@@ -14,12 +14,14 @@ export const CommitteeCard: React.FC<CommitteeCardProps> = ({ member }) => {
   return (
     <>
       <div className="bg-white rounded-2xl overflow-hidden border border-[color:var(--site-primary)]/10 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between h-full group hover:-translate-y-1">
-        {/* Photo Container */}
-        <div className="relative h-64 overflow-hidden bg-[color:var(--site-primary)]/5">
+        {/* Photo Container — 4:5 portrait frame. The photo is anchored to its top
+            edge (object-top), so any cropping happens at the bottom and the top of
+            the head and hair stay visible; the hover zoom also scales from the top. */}
+        <div className="relative aspect-[4/5] shrink-0 overflow-hidden bg-[color:var(--site-primary)]/5">
           <img
             src={member.photo}
             alt={member.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            className="w-full h-full object-cover object-top origin-top group-hover:scale-105 transition-transform duration-500"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-[color:var(--site-primary)]/90 via-[color:var(--site-primary)]/20 to-transparent" />
 
@@ -77,7 +79,7 @@ export const CommitteeCard: React.FC<CommitteeCardProps> = ({ member }) => {
               <img
                 src={member.photo}
                 alt={member.name}
-                className="w-20 h-20 rounded-full object-cover border-2 border-[color:var(--site-accent)] shadow-md shrink-0"
+                className="w-20 h-20 rounded-full object-cover object-top border-2 border-[color:var(--site-accent)] shadow-md shrink-0"
               />
               <div>
                 <h3 className="text-xl font-bold font-serif text-[color:var(--site-primary)]">{member.name}</h3>
